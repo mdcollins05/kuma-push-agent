@@ -86,6 +86,31 @@ docker compose build    # picks up new lock
 
 **Templates are baked into the Docker image — there is no live reload in the container.** Every change to `app/` (templates, routers, models, etc.) requires a full rebuild: `docker compose up --build -d`.
 
+## Branching and Release Workflow
+
+All changes go through a branch + PR — never commit directly to `main`.
+
+```bash
+# Start a new feature or fix
+git checkout -b feat/my-feature   # or fix/my-fix
+
+# ... make changes, rebuild, test ...
+
+git add <files>
+git commit -m "feat: description"
+git push -u origin feat/my-feature
+# Open a PR on GitHub → merge into main
+```
+
+To publish a release after merging:
+```bash
+git checkout main && git pull
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+This triggers the release workflow: tests run, then a multi-arch Docker image is built and pushed to `ghcr.io/mdcollins05/kuma-push-agent` with tags `1.2.3`, `1.2`, `1`, and `latest`.
+
 ## Testing
 
 Tests run in a separate Docker image with dev dependencies (pytest) installed. No host Python install or running Kuma server needed.
