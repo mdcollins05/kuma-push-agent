@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 scheduler = BackgroundScheduler(
     executors={"default": ThreadPoolExecutor(10)},
     job_defaults={"max_instances": 1, "coalesce": True},
+    timezone="UTC",
 )
 
 
