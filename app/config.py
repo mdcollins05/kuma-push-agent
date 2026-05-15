@@ -1,6 +1,9 @@
+import os
 import pathlib
 import secrets
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+APP_VERSION: str = os.environ.get("APP_VERSION", "dev")
 
 
 class Settings(BaseSettings):
