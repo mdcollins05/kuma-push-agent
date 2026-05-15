@@ -29,7 +29,8 @@
 {% if user is defined %}
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
   <div class="container">
-    <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="/"
+       title="Kuma Push Agent v{{ app_version }}" data-bs-toggle="tooltip" data-bs-placement="bottom">
       <img src="/static/img/favicon.svg" width="24" height="24" alt="">
       Kuma Push Agent
     </a>
@@ -88,5 +89,6 @@
 })();
 </script>
 <script src="/static/js/bootstrap.bundle.min.js"></script>
+<script>document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function(el){new bootstrap.Tooltip(el);});</script>
 </body>
 </html>

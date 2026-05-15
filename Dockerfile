@@ -10,6 +10,9 @@ COPY pyproject.toml ./
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM base AS production
 
+ARG VERSION=dev
+ENV APP_VERSION=$VERSION
+
 RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 
 COPY app/ ./app/

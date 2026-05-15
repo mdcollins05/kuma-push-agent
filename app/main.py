@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from .config import settings
+from .config import settings, APP_VERSION
 from .database import engine
 from .dependencies import LoginRequired, SetupRequired
 from .models import AppSettings, Base
@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     start_kuma_queue_processor()
     start_notification_cache_refresher()
     scheduler.start()
-    logger.info("Kuma Push Agent started — %d monitor jobs scheduled", len(scheduler.get_jobs()))
+    logger.info("Kuma Push Agent v%s started — %d monitor jobs scheduled", APP_VERSION, len(scheduler.get_jobs()))
 
     yield
 

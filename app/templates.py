@@ -18,3 +18,6 @@ def _local_dt(dt: datetime | None, tz_str: str | None = "UTC") -> str | None:
 
 
 templates.env.filters["local_dt"] = _local_dt
+
+from .config import APP_VERSION
+templates.env.globals["app_version"] = APP_VERSION
