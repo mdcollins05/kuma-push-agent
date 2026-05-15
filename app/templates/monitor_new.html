@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}New Monitor — Kuma Push Agent{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-lg-6">
+    <div class="d-flex align-items-center mb-3">
+      <a href="/" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+      <h5 class="fw-bold mb-0">New Monitor</h5>
+    </div>
+    {% if error %}
+    <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+    <div class="card p-4">
+      <form method="post" action="/monitors/new">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Name</label>
+          <input type="text" name="name" class="form-control" placeholder="My Service" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">URL</label>
+          <input type="url" name="url" class="form-control" placeholder="https://example.com" required>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" value="true" checked>
+            <label class="form-check-label" for="verify_ssl">Verify SSL certificate</label>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Check Interval (seconds)</label>
+          <input type="number" name="interval" class="form-control" value="60" min="20" required>
+          <div class="form-text">Minimum 20 seconds.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Expected Status Codes</label>
+          <input type="text" name="expected_codes_raw" class="form-control" value="200" placeholder="200, 201">
+          <div class="form-text">Comma-separated list of acceptable HTTP status codes.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Max Response Time (optional)</label>
+          <div class="input-group">
+            <input type="number" name="max_response_ms" class="form-control" placeholder="e.g. 2000" min="1">
+            <span class="input-group-text">ms</span>
+          </div>
+          <div class="form-text">Mark DOWN if response takes longer than this.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Keyword (optional)</label>
+          <input type="text" name="keyword" class="form-control" placeholder="ok">
+          <div class="form-text">Response body must contain this string to be considered UP.</div>
+        </div>
+        {% if notifications %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Uptime Kuma Notifications</label>
+          <div class="d-flex flex-column gap-1">
+            {% for n in notifications %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="notification_ids"
+                id="notif_{{ n.id }}" value="{{ n.id }}">
+              <label class="form-check-label" for="notif_{{ n.id }}">{{ n.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Create Monitor</button>
+        <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

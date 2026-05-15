@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Kuma Push Agent{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+  <!-- Apply theme before CSS loads to avoid flash -->
+  <script>(function(){var t=localStorage.getItem('theme')||'auto';var d=t==='auto'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;document.documentElement.setAttribute('data-bs-theme',d);})();</script>
+  <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/static/css/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body { opacity: 0; border-top: 3px solid #2dce89; }
+    .navbar-brand { font-weight: 700; letter-spacing: -0.5px; }
+    .status-up { color: #198754; }
+    .status-down { color: #dc3545; }
+    .status-unknown { color: #6c757d; }
+    .badge-up { background-color: #198754; }
+    .badge-down { background-color: #dc3545; }
+    .badge-unknown { background-color: #6c757d; }
+    .card { border: none; border-top: 2px solid rgba(45,206,137,.35); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    h5.fw-bold { color: #2dce89; }
+    #theme-toggle .btn { color: rgba(255,255,255,.5); border-color: rgba(255,255,255,.2); }
+    #theme-toggle .btn:hover { color: #fff; border-color: rgba(255,255,255,.4); }
+    #theme-toggle .btn.active { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.4); }
+  </style>
+</head>
+<body>
+{% if user is defined %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+  <div class="container">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="/">
+      <img src="/static/img/favicon.svg" width="24" height="24" alt="">
+      Kuma Push Agent
+    </a>
+    <div class="d-flex align-items-center gap-3">
+      <a href="/" class="nav-link text-white-50"><i class="bi bi-grid"></i> Dashboard</a>
+      <a href="/settings" class="nav-link text-white-50"><i class="bi bi-gear"></i> Settings</a>
+
+      <div class="btn-group btn-group-sm" id="theme-toggle" role="group" aria-label="Color theme">
+        <button type="button" class="btn btn-outline-secondary" data-theme="light" title="Light mode"><i class="bi bi-sun"></i></button>
+        <button type="button" class="btn btn-outline-secondary" data-theme="auto"  title="Auto (system)"><i class="bi bi-circle-half"></i></button>
+        <button type="button" class="btn btn-outline-secondary" data-theme="dark"  title="Dark mode"><i class="bi bi-moon"></i></button>
+      </div>
+
+      <form method="post" action="/logout" class="d-inline">
+        <button type="submit" class="btn btn-sm btn-outline-secondary text-white-50">
+          <i class="bi bi-box-arrow-right"></i> {{ user }}
+        </button>
+      </form>
+    </div>
+  </div>
+</nav>
+{% endif %}
+<div class="container pb-5">
+  {% block content %}{% endblock %}
+</div>
+<script>
+(function () {
+  function applyTheme(t) {
+    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var resolved = t === 'auto' ? (prefersDark ? 'dark' : 'light') : t;
+    document.documentElement.setAttribute('data-bs-theme', resolved);
+    localStorage.setItem('theme', t);
+    var toggle = document.getElementById('theme-toggle');
+    if (toggle) {
+      toggle.querySelectorAll('button').forEach(function (btn) {
+        btn.classList.toggle('active', btn.dataset.theme === t);
+      });
+    }
+  }
+
+  applyTheme(localStorage.getItem('theme') || 'auto');
+
+  var toggle = document.getElementById('theme-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-theme]');
+      if (btn) applyTheme(btn.dataset.theme);
+    });
+  }
+
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+    if ((localStorage.getItem('theme') || 'auto') === 'auto') applyTheme('auto');
+  });
+
+  document.body.style.opacity = 1;
+})();
+</script>
+<script src="/static/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

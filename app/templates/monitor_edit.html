@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ monitor.name }} — Kuma Push Agent{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div class="d-flex align-items-center">
+    <a href="/" class="btn btn-sm btn-outline-secondary me-2"><i class="bi bi-arrow-left"></i></a>
+    <h5 class="fw-bold mb-0">{{ monitor.name }}</h5>
+  </div>
+  <div class="d-flex gap-2">
+    {% if monitor.enabled %}
+    <form method="post" action="/monitors/{{ monitor.id }}/pause">
+      <button type="submit" class="btn btn-warning btn-sm">
+        <i class="bi bi-pause-circle"></i> Pause
+      </button>
+    </form>
+    {% else %}
+    <form method="post" action="/monitors/{{ monitor.id }}/resume">
+      <button type="submit" class="btn btn-success btn-sm">
+        <i class="bi bi-play-circle"></i> Resume
+      </button>
+    </form>
+    {% endif %}
+    <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteModal">
+      <i class="bi bi-trash"></i> Delete
+    </button>
+  </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div id="sync-warning"
+     class="alert {% if failed_jobs > 0 %}alert-danger{% else %}alert-warning{% endif %} py-2 d-flex align-items-center gap-2 mb-3"
+     {% if pending_jobs == 0 and failed_jobs == 0 %}style="display:none!important"{% endif %}>
+  <i id="sync-warning-icon" class="bi {% if failed_jobs > 0 %}bi-x-circle{% else %}bi-arrow-repeat{% endif %}"></i>
+  <span id="sync-warning-text">
+    {% if failed_jobs > 0 and pending_jobs > 0 %}
+      {{ failed_jobs }} sync job{{ 's' if failed_jobs != 1 else '' }} failed, {{ pending_jobs }} pending — Uptime Kuma may be out of date.
+    {% elif failed_jobs > 0 %}
+      {{ failed_jobs }} sync job{{ 's' if failed_jobs != 1 else '' }} failed — Uptime Kuma may be out of date.
+    {% else %}
+      {{ pending_jobs }} sync job{{ 's' if pending_jobs != 1 else '' }} pending — syncing with Uptime Kuma…
+    {% endif %}
+  </span>
+  <form method="post" action="/monitors/{{ monitor.id }}/resync" class="ms-auto">
+    <button type="submit" class="btn btn-sm {% if failed_jobs > 0 %}btn-danger{% else %}btn-warning{% endif %}" id="sync-resync-btn">
+      <i class="bi bi-arrow-repeat"></i> Re-sync Now
+    </button>
+  </form>
+</div>
+
+<div class="row">
+  <div class="col-lg-7">
+    <div class="card p-4 mb-3">
+      <form method="post" action="/monitors/{{ monitor.id }}/edit">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Name</label>
+          <input type="text" name="name" class="form-control" value="{{ monitor.name }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">URL</label>
+          <input type="url" name="url" class="form-control" value="{{ monitor.url }}" required>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" value="true"
+              {{ 'checked' if monitor.verify_ssl else '' }}>
+            <label class="form-check-label" for="verify_ssl">Verify SSL certificate</label>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Check Interval (seconds)</label>
+          <input type="number" name="interval" class="form-control" value="{{ monitor.interval }}" min="20" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Expected Status Codes</label>
+          <input type="text" name="expected_codes_raw" class="form-control"
+            value="{{ (monitor.expected_codes or [200]) | join(', ') }}" placeholder="200, 201">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Max Response Time (optional)</label>
+          <div class="input-group">
+            <input type="number" name="max_response_ms" class="form-control"
+              value="{{ monitor.max_response_ms or '' }}" placeholder="e.g. 2000" min="1">
+            <span class="input-group-text">ms</span>
+          </div>
+          <div class="form-text">Mark DOWN if response takes longer than this.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Keyword (optional)</label>
+          <input type="text" name="keyword" class="form-control" value="{{ monitor.keyword or '' }}">
+        </div>
+        {% if notifications %}
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Uptime Kuma Notifications</label>
+          <div class="d-flex flex-column gap-1">
+            {% for n in notifications %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="notification_ids"
+                id="notif_{{ n.id }}" value="{{ n.id }}"
+                {{ 'checked' if n.id in (monitor.notification_ids or []) else '' }}>
+              <label class="form-check-label" for="notif_{{ n.id }}">{{ n.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-5 mt-4 mt-lg-0">
+    <div class="card p-4">
+      <h6 class="fw-semibold mb-3">Last Check</h6>
+      <div id="status-card">
+      {% if monitor.last_check_time %}
+      <p class="mb-1">
+        <span class="badge {% if monitor.last_status == 'up' %}badge-up{% elif monitor.last_status == 'down' %}badge-down{% else %}badge-unknown{% endif %}">
+          {{ (monitor.last_status or '—') | upper }}
+        </span>
+      </p>
+      <p class="small text-muted mb-1">{{ monitor.last_check_time | local_dt(timezone) }}</p>
+      {% if monitor.last_response_ms is not none %}
+      <p class="small mb-1">Response: {{ monitor.last_response_ms }} ms</p>
+      {% endif %}
+      {% if monitor.last_error %}
+      <p class="small text-danger mb-0">{{ monitor.last_error }}</p>
+      {% endif %}
+      {% else %}
+      <p class="text-muted small">No check run yet.</p>
+      {% endif %}
+      </div>
+
+      <hr>
+      <h6 class="fw-semibold mb-2">Uptime Kuma Sync</h6>
+      <div id="kuma-sync-status">
+      {% if monitor.kuma_synced and kuma_configured %}
+      <p class="small mb-0 text-success"><i class="bi bi-check-circle"></i> Synced with Uptime Kuma (ID {{ monitor.kuma_monitor_id }})</p>
+      {% elif monitor.kuma_synced and not kuma_configured %}
+      <p class="small mb-0 text-warning"><i class="bi bi-cloud-slash"></i> Previously synced — no Uptime Kuma server connected.</p>
+      {% else %}
+      <p class="small mb-0 text-muted"><i class="bi bi-clock"></i> Not synced with Uptime Kuma — will retry on next check.</p>
+      {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-semibold">Delete Monitor</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="/monitors/{{ monitor.id }}/delete">
+        <div class="modal-body">
+          <p>Remove <strong>{{ monitor.name }}</strong> from Kuma Push Agent? This cannot be undone.</p>
+          {% if monitor.kuma_synced %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="remove_from_kuma" id="remove_from_kuma" value="true">
+            <label class="form-check-label" for="remove_from_kuma">
+              Also remove from Uptime Kuma
+            </label>
+          </div>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+const monitorId = {{ monitor.id }};
+
+function renderStatusCard(m) {
+  let html = '';
+  if (m.last_check_time) {
+    const badgeClass = m.last_status === 'up' ? 'badge-up' : m.last_status === 'down' ? 'badge-down' : 'badge-unknown';
+    const label = (m.last_status || '—').toUpperCase();
+    html += `<p class="mb-1"><span class="badge ${badgeClass}">${label}</span></p>`;
+    html += `<p class="small text-muted mb-1">${m.last_check_time}</p>`;
+    if (m.last_response_ms != null) html += `<p class="small mb-1">Response: ${m.last_response_ms} ms</p>`;
+    if (m.last_error) html += `<p class="small text-danger mb-0">${m.last_error}</p>`;
+  } else {
+    html = '<p class="text-muted small">No check run yet.</p>';
+  }
+  document.getElementById('status-card').innerHTML = html;
+}
+
+const kumaConfigured = {{ 'true' if kuma_configured else 'false' }};
+
+function renderKumaSync(m) {
+  let html;
+  if (m.kuma_synced && kumaConfigured)
+    html = `<p class="small mb-0 text-success"><i class="bi bi-check-circle"></i> Synced with Uptime Kuma (ID ${m.kuma_monitor_id})</p>`;
+  else if (m.kuma_synced && !kumaConfigured)
+    html = '<p class="small mb-0 text-warning"><i class="bi bi-cloud-slash"></i> Previously synced — no Uptime Kuma server connected.</p>';
+  else
+    html = '<p class="small mb-0 text-muted"><i class="bi bi-clock"></i> Not synced with Uptime Kuma — will retry on next check.</p>';
+  document.getElementById('kuma-sync-status').innerHTML = html;
+}
+
+function renderSyncWarning(m) {
+  const banner = document.getElementById('sync-warning');
+  const p = m.pending_jobs || 0;
+  const f = m.failed_jobs || 0;
+  if (p === 0 && f === 0) {
+    banner.style.setProperty('display', 'none', 'important');
+    return;
+  }
+  banner.style.removeProperty('display');
+  const hasFailed = f > 0;
+  banner.className = `alert py-2 d-flex align-items-center gap-2 mb-3 ${hasFailed ? 'alert-danger' : 'alert-warning'}`;
+  document.getElementById('sync-warning-icon').className = `bi ${hasFailed ? 'bi-x-circle' : 'bi-arrow-repeat'}`;
+  document.getElementById('sync-resync-btn').className = `btn btn-sm ${hasFailed ? 'btn-danger' : 'btn-warning'}`;
+  let text;
+  if (hasFailed && p > 0)
+    text = `${f} sync job${f !== 1 ? 's' : ''} failed, ${p} pending — Uptime Kuma may be out of date.`;
+  else if (hasFailed)
+    text = `${f} sync job${f !== 1 ? 's' : ''} failed — Uptime Kuma may be out of date.`;
+  else
+    text = `${p} sync job${p !== 1 ? 's' : ''} pending — syncing with Uptime Kuma…`;
+  document.getElementById('sync-warning-text').textContent = text;
+}
+
+async function pollStatus() {
+  try {
+    const resp = await fetch(`/monitors/${monitorId}/status`);
+    if (!resp.ok) return;
+    const m = await resp.json();
+    renderStatusCard(m);
+    renderKumaSync(m);
+    renderSyncWarning(m);
+  } catch (_) {}
+}
+
+setInterval(pollStatus, 10000);
+</script>
+{% endblock %}

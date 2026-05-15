@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Setup — Kuma Push Agent{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-sm-10 col-md-7 col-lg-4">
+    <div class="card p-4">
+      <h4 class="mb-1 fw-bold"><i class="bi bi-activity"></i> Kuma Push Agent</h4>
+      <p class="text-muted small mb-4">Create your admin account to get started.</p>
+
+      {% if error %}
+      <div class="alert alert-danger py-2">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/setup">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Username</label>
+          <input type="text" name="ui_username" class="form-control" autofocus required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Password</label>
+          <input type="password" name="ui_password" class="form-control" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Timezone</label>
+          <select name="timezone" id="timezone" class="form-select" required>
+            {% for iana, label in timezones %}
+            <option value="{{ iana }}" {% if iana == 'UTC' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-2">Create Account</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (tz) {
+    const sel = document.getElementById('timezone');
+    const opt = [...sel.options].find(o => o.value === tz);
+    if (opt) sel.value = tz;
+  }
+</script>
+{% endblock %}

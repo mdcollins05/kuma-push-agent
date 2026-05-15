@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Settings — Kuma Push Agent{% endblock %}
+{% block content %}
+<h5 class="fw-bold mb-4">Settings</h5>
+
+{% if saved %}
+<div class="alert alert-success py-2"><i class="bi bi-check-circle"></i> Settings saved.</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-7">
+
+    <!-- Uptime Kuma connection -->
+    <div class="card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-semibold mb-0">Uptime Kuma</h6>
+        {% if s.configured %}
+          <span class="badge bg-success">Connected</span>
+        {% else %}
+          <span class="badge bg-secondary">Not configured</span>
+        {% endif %}
+      </div>
+
+      {% if s.configured %}
+      <form method="post" action="/settings/kuma" id="kuma-form">
+        <div class="mb-3">
+          <label class="form-label">Uptime Kuma URL</label>
+          <input type="url" name="kuma_url" class="form-control" value="{{ s.kuma_url or '' }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" name="kuma_username" class="form-control" value="{{ s.kuma_username or '' }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" name="kuma_password" class="form-control" placeholder="Leave blank to keep current">
+        </div>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <button type="submit" class="btn btn-sm btn-primary">Save</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testKumaConnection('kuma-form')">
+            <i class="bi bi-plug"></i> Test
+          </button>
+          <span id="test-result" class="small"></span>
+          <button type="button" class="btn btn-sm btn-outline-danger ms-auto"
+            data-bs-toggle="modal" data-bs-target="#disconnectModal">
+            <i class="bi bi-x-lg"></i> Disconnect
+          </button>
+        </div>
+      </form>
+      <form id="disconnect-form" method="post" action="/settings/kuma/disconnect"></form>
+
+      {% else %}
+      <p class="text-muted small mb-3">Connect an Uptime Kuma server to push monitor status automatically.</p>
+      <button class="btn btn-sm btn-outline-primary" type="button"
+        data-bs-toggle="collapse" data-bs-target="#kuma-add-form">
+        <i class="bi bi-plus-lg"></i> Add Uptime Kuma Server
+      </button>
+      <div class="collapse mt-3" id="kuma-add-form">
+        <form method="post" action="/settings/kuma" id="kuma-form">
+          <div class="mb-3">
+            <label class="form-label">Uptime Kuma URL</label>
+            <input type="url" name="kuma_url" class="form-control" placeholder="http://uptime-kuma:3001" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input type="text" name="kuma_username" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Password</label>
+            <input type="password" name="kuma_password" class="form-control" required>
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testKumaConnection('kuma-form')">
+              <i class="bi bi-plug"></i> Test
+            </button>
+            <span id="test-result" class="small"></span>
+          </div>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Timezone -->
+    <div class="card p-4 mb-4">
+      <h6 class="fw-semibold mb-3">Timezone</h6>
+      <form method="post" action="/settings/timezone">
+        <div class="mb-3">
+          <label class="form-label">Display Timezone</label>
+          <select name="timezone" id="tz-select" class="form-select" required>
+            {% for iana, label in timezones %}
+            <option value="{{ iana }}" {% if iana == (s.timezone or 'UTC') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">All timestamps in the UI will use this timezone.</div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <button type="submit" class="btn btn-sm btn-primary">Save</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setBrowserTz()">
+            Use Browser Timezone
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Change password -->
+    <div class="card p-4 mb-4">
+      <h6 class="fw-semibold mb-3">Change Password</h6>
+      <form method="post" action="/settings/password">
+        <div class="mb-3">
+          <label class="form-label">New Password</label>
+          <input type="password" name="new_password" class="form-control" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Confirm New Password</label>
+          <input type="password" name="confirm_password" class="form-control" required>
+        </div>
+        {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+        {% endif %}
+        <button type="submit" class="btn btn-sm btn-primary">Update Password</button>
+      </form>
+    </div>
+
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card p-4">
+      <h6 class="fw-semibold mb-3">API Key</h6>
+      <p class="small text-muted mb-2">Pass via <code>X-API-Key</code> header to authenticate API requests.</p>
+      <div class="input-group mb-3">
+        <input type="text" class="form-control form-control-sm font-monospace"
+          value="{{ s.api_key or '' }}" id="api-key-field" readonly>
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+          onclick="navigator.clipboard.writeText(document.getElementById('api-key-field').value)">
+          <i class="bi bi-clipboard"></i>
+        </button>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-danger"
+        data-bs-toggle="modal" data-bs-target="#regenModal">
+        <i class="bi bi-arrow-clockwise"></i> Regenerate Key
+      </button>
+      <form id="regen-form" method="post" action="/settings/regenerate-key"></form>
+    </div>
+  </div>
+</div>
+
+<!-- Disconnect modal -->
+<div class="modal fade" id="disconnectModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-semibold">Disconnect Uptime Kuma</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0">Existing push tokens will stop working. Monitors will continue checking URLs locally but results won't be pushed to Uptime Kuma.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" form="disconnect-form" class="btn btn-danger btn-sm">Disconnect</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Regenerate key modal -->
+<div class="modal fade" id="regenModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title fw-semibold">Regenerate API Key</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-0">The current API key will be invalidated immediately. Any integrations using it will stop working.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" form="regen-form" class="btn btn-danger btn-sm">Regenerate</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function setBrowserTz() {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const sel = document.getElementById('tz-select');
+  const opt = sel && [...sel.options].find(o => o.value === tz);
+  if (opt) sel.value = tz;
+}
+
+async function testKumaConnection(formId) {
+  const form = document.getElementById(formId);
+  const data = new FormData();
+  data.append('kuma_url', form.querySelector('[name=kuma_url]').value);
+  data.append('kuma_username', form.querySelector('[name=kuma_username]').value);
+  data.append('kuma_password', form.querySelector('[name=kuma_password]').value);
+  const el = document.getElementById('test-result');
+  el.textContent = 'Testing…';
+  try {
+    const resp = await fetch('/settings/test', {method: 'POST', body: data});
+    const result = await resp.json();
+    el.innerHTML = result.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle"></i> Connected</span>'
+      : `<span class="text-danger"><i class="bi bi-x-circle"></i> ${result.error}</span>`;
+  } catch (e) {
+    el.innerHTML = '<span class="text-danger">Request failed</span>';
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,5 @@
+# Kuma Push Agent seed file — imported on first boot if the monitors table is empty.
+# After first boot, manage monitors via the web UI at http://localhost:3002.
+# Editing this file after first boot has no effect unless you clear the database.
+
+monitors: []
