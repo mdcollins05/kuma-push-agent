@@ -21,7 +21,7 @@ def create_push_monitor(
     """
     import logging
     logger = logging.getLogger(__name__)
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         kwargs = {}
         if notification_ids:
@@ -49,7 +49,7 @@ def get_push_token(
     kuma_password: str,
 ) -> str:
     """Fetch the push token for an existing Kuma Push monitor. Blocking."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         monitor_data = api.get_monitor(kuma_monitor_id)
 
@@ -67,7 +67,7 @@ def update_monitor(
     **kwargs,
 ) -> None:
     """Update fields on an existing Kuma monitor. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         api.edit_monitor(kuma_monitor_id, **kwargs)
 
@@ -79,7 +79,7 @@ def pause_monitor(
     kuma_password: str,
 ) -> None:
     """Pause a monitor in Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         api.pause_monitor(kuma_monitor_id)
 
@@ -91,7 +91,7 @@ def resume_monitor(
     kuma_password: str,
 ) -> None:
     """Resume a paused monitor in Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         api.resume_monitor(kuma_monitor_id)
 
@@ -103,7 +103,7 @@ def delete_monitor(
     kuma_password: str,
 ) -> None:
     """Delete a monitor from Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         api.delete_monitor(kuma_monitor_id)
 
@@ -114,7 +114,7 @@ def get_notifications(
     kuma_password: str,
 ) -> list[dict]:
     """Fetch all notification channels from Kuma. Blocking."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
         return api.get_notifications()
 
@@ -125,7 +125,7 @@ def test_connection(
     kuma_password: str,
 ) -> None:
     """Test Kuma connectivity and credentials. Blocking — raises on failure."""
-    with UptimeKumaApi(kuma_url) as api:
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
         api.login(kuma_username, kuma_password)
 
 

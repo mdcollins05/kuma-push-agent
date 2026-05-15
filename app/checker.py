@@ -13,10 +13,12 @@ def run_check(monitor_id: int) -> None:
     from .kuma import build_push_url, create_push_monitor
     from .models import AppSettings, Monitor
 
+    logger.info("run_check start: monitor_id=%d", monitor_id)
     db = SessionLocal()
     try:
         monitor = db.get(Monitor, monitor_id)
         if not monitor or not monitor.enabled:
+            logger.info("run_check skip: monitor_id=%d not found or disabled", monitor_id)
             return
 
         expected_codes = monitor.expected_codes or [200]
@@ -52,9 +54,12 @@ def run_check(monitor_id: int) -> None:
 
         app_cfg = db.get(AppSettings, 1)
         if not app_cfg or not app_cfg.configured or not app_cfg.kuma_url:
+            logger.info("run_check skip kuma sync: monitor_id=%d — not configured (configured=%s, kuma_url=%s)",
+                        monitor_id, getattr(app_cfg, "configured", None), bool(getattr(app_cfg, "kuma_url", None)))
             return
 
         if not monitor.kuma_synced:
+            logger.info("run_check kuma sync: monitor_id=%d kuma_monitor_id=%s", monitor_id, monitor.kuma_monitor_id)
             try:
                 from .kuma import get_push_token
                 if not monitor.kuma_monitor_id:
