@@ -16,47 +16,22 @@ A Dockerized remote health-check agent for [Uptime Kuma](https://github.com/loui
 **Prerequisites:** Docker + Docker Compose
 
 ```bash
-git clone <this-repo>
-cd Kuma Push Agent
-mkdir -p data
+git clone https://github.com/mdcollins05/kuma-push-agent.git
+cd kuma-push-agent
 docker compose up -d
 ```
 
-1. Visit **http://localhost:3001** — complete the Uptime Kuma first-run setup (create an admin account).
-2. Visit **http://localhost:3002** — you'll be redirected to `/setup`.
-3. Enter your Kuma URL (`http://uptime-kuma:3001`), Kuma credentials, and create a Kuma Push Agent admin account.
-4. Click **Test Connection** to verify Kuma connectivity, then **Finish Setup**.
-5. Add monitors via the dashboard or seed them from a YAML file (see below).
-
-## Seeding Monitors from YAML
-
-Place a `config/monitors.yaml` file before the first boot:
-
-```yaml
-monitors:
-  - name: "My Site"
-    url: "https://example.com"
-    interval: 60
-    expected_codes: [200]
-    verify_ssl: true
-
-  - name: "API Health"
-    url: "https://api.example.com/health"
-    interval: 30
-    expected_codes: [200]
-    keyword: "ok"
-    verify_ssl: true
-```
-
-Seeding only happens once (when the monitors table is empty). After that, manage monitors through the UI.
+1. Visit **http://&lt;host&gt;:3002** — you'll be redirected to `/setup`.
+2. Create an admin account and optionally connect an Uptime Kuma server.
+3. Add monitors via the dashboard.
 
 ## Web UI
 
 | Page | URL |
 |---|---|
-| Dashboard | http://localhost:3002/ |
-| Add Monitor | http://localhost:3002/monitors/new |
-| Settings | http://localhost:3002/settings |
+| Dashboard | http://&lt;host&gt;:3002/ |
+| Add Monitor | http://&lt;host&gt;:3002/monitors/new |
+| Settings | http://&lt;host&gt;:3002/settings |
 
 ### Monitor Actions (Edit page)
 
@@ -72,7 +47,7 @@ All API requests require an `X-API-Key` header. Find your key at `/settings`.
 
 ```bash
 API_KEY="your-key-here"
-BASE="http://localhost:3002/api/v1"
+BASE="http://<host>:3002/api/v1"
 
 # List all monitors
 curl -H "X-API-Key: $API_KEY" $BASE/monitors
@@ -101,7 +76,6 @@ All configuration is stored in the SQLite database at `/data/kuma_push_agent.db`
 | Volume | Purpose |
 |---|---|
 | `./data` → `/data` | SQLite database + session secret |
-| `./config` → `/config` | YAML seed file (optional) |
 
 The only environment variable is `DATA_DIR` (default `/data`) and `CONFIG_DIR` (default `/config`), which you generally don't need to change.
 
