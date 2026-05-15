@@ -1,6 +1,6 @@
 # Kuma Push Agent
 
-A Dockerized remote health-check agent for [Uptime Kuma](https://github.com/louislam/uptime-kuma). It monitors a list of URLs, pushes results to Uptime Kuma via **Push-type monitors**, and auto-creates those monitors in Kuma for you.
+A Dockerized remote health-check agent for [Uptime Kuma](https://github.com/louislam/uptime-kuma). Deploy it inside a network where Uptime Kuma can't reach — behind a firewall, on a private VLAN, or in an isolated environment — and it will monitor your services locally and push results out to Uptime Kuma via **Push-type monitors**. Monitor auto-creation in Kuma is handled for you.
 
 ## Features
 
