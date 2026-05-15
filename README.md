@@ -111,3 +111,7 @@ Kuma Push Agent (port 3002)
 └── uptime-kuma-api-v2 (Socket.IO, threadpool)
     └── Creates/pauses/deletes Kuma Push monitors
 ```
+
+## A Note on AI Assistance
+
+This project was built with significant help from AI (Claude). That said, the author actively runs it in their own homelab and has thoroughly tested the functionality. All generated code has been reviewed, exercised, and validated against a real Uptime Kuma instance.
