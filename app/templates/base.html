@@ -20,9 +20,13 @@
     .badge-unknown { background-color: #6c757d; }
     .card { border: none; border-top: 2px solid rgba(45,206,137,.35); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     h5.fw-bold { color: #2dce89; }
-    #theme-toggle .btn { color: rgba(255,255,255,.5); border-color: rgba(255,255,255,.2); }
-    #theme-toggle .btn:hover { color: #fff; border-color: rgba(255,255,255,.4); }
-    #theme-toggle .btn.active { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.4); }
+    #theme-btn { color: rgba(255,255,255,.5); border-color: rgba(255,255,255,.2); }
+    #theme-btn:hover { color: #fff; border-color: rgba(255,255,255,.4); }
+    #theme-toggle .dropdown-menu { display: none; min-width: 0; padding: 2px; left: 50%; right: auto; transform: translateX(-50%); }
+    #theme-toggle:hover .dropdown-menu { display: flex; }
+    #theme-menu button { color: var(--bs-secondary-color); padding: 2px 7px; border-radius: 4px; background: none; border: none; }
+    #theme-menu button:hover { color: var(--bs-body-color); background: var(--bs-tertiary-bg); }
+    #theme-menu button.active { color: var(--bs-emphasis-color); background: var(--bs-secondary-bg); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -38,10 +42,15 @@
       <a href="/" class="nav-link text-white-50"><i class="bi bi-grid"></i> Dashboard</a>
       <a href="/settings" class="nav-link text-white-50"><i class="bi bi-gear"></i> Settings</a>
 
-      <div class="btn-group btn-group-sm" id="theme-toggle" role="group" aria-label="Color theme">
-        <button type="button" class="btn btn-outline-secondary" data-theme="light" title="Light mode"><i class="bi bi-sun"></i></button>
-        <button type="button" class="btn btn-outline-secondary" data-theme="auto"  title="Auto (system)"><i class="bi bi-circle-half"></i></button>
-        <button type="button" class="btn btn-outline-secondary" data-theme="dark"  title="Dark mode"><i class="bi bi-moon"></i></button>
+      <div class="dropdown" id="theme-toggle">
+        <button class="btn btn-sm btn-outline-secondary" id="theme-btn" title="Color theme">
+          <i class="bi bi-circle-half" id="theme-icon"></i>
+        </button>
+        <ul class="dropdown-menu" id="theme-menu" style="flex-direction:row;">
+          <li><button data-theme="light" title="Light"><i class="bi bi-sun"></i></button></li>
+          <li><button data-theme="auto"  title="Auto"><i class="bi bi-circle-half"></i></button></li>
+          <li><button data-theme="dark"  title="Dark"><i class="bi bi-moon"></i></button></li>
+        </ul>
       </div>
 
       <form method="post" action="/logout" class="d-inline">
@@ -58,14 +67,18 @@
 </div>
 <script>
 (function () {
+  var icons = { light: 'bi-sun', auto: 'bi-circle-half', dark: 'bi-moon' };
+
   function applyTheme(t) {
     var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     var resolved = t === 'auto' ? (prefersDark ? 'dark' : 'light') : t;
     document.documentElement.setAttribute('data-bs-theme', resolved);
     localStorage.setItem('theme', t);
-    var toggle = document.getElementById('theme-toggle');
-    if (toggle) {
-      toggle.querySelectorAll('button').forEach(function (btn) {
+    var icon = document.getElementById('theme-icon');
+    if (icon) icon.className = 'bi ' + (icons[t] || 'bi-circle-half');
+    var menu = document.getElementById('theme-menu');
+    if (menu) {
+      menu.querySelectorAll('button[data-theme]').forEach(function (btn) {
         btn.classList.toggle('active', btn.dataset.theme === t);
       });
     }
@@ -73,9 +86,9 @@
 
   applyTheme(localStorage.getItem('theme') || 'auto');
 
-  var toggle = document.getElementById('theme-toggle');
-  if (toggle) {
-    toggle.addEventListener('click', function (e) {
+  var menu = document.getElementById('theme-menu');
+  if (menu) {
+    menu.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-theme]');
       if (btn) applyTheme(btn.dataset.theme);
     });
