@@ -10,6 +10,7 @@ class MonitorCreate(BaseModel):
     expected_codes: List[int] = [200]
     keyword: Optional[str] = None
     verify_ssl: bool = True
+    tag_ids: List[int] = []
 
     @field_validator("interval")
     @classmethod

@@ -73,3 +73,16 @@ def start_notification_cache_refresher() -> None:
     )
     # Populate cache immediately on startup
     scheduler.add_job(refresh, "date", id="notification_cache_initial")
+
+
+def start_tag_cache_refresher() -> None:
+    from .tag_cache import refresh
+
+    scheduler.add_job(
+        refresh,
+        "interval",
+        minutes=5,
+        id="tag_cache_refresher",
+        replace_existing=True,
+    )
+    scheduler.add_job(refresh, "date", id="tag_cache_initial")

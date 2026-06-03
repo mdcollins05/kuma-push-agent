@@ -17,6 +17,7 @@ class Monitor(Base):
     keyword = Column(String, nullable=True)
     max_response_ms = Column(Integer, nullable=True)
     notification_ids = Column(JSON, nullable=True, default=list)
+    tag_ids = Column(JSON, nullable=True, default=list)
     verify_ssl = Column(Boolean, default=True)
 
     kuma_monitor_id = Column(Integer, nullable=True)

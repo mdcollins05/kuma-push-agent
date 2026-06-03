@@ -119,6 +119,56 @@ def get_notifications(
         return api.get_notifications()
 
 
+def get_tags(
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> list[dict]:
+    """Fetch all tags from Kuma. Blocking."""
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
+        api.login(kuma_username, kuma_password)
+        return api.get_tags()
+
+
+def create_tag(
+    name: str,
+    color: str,
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> dict:
+    """Create a new tag in Kuma. Returns the created tag dict (includes `id`). Blocking."""
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
+        api.login(kuma_username, kuma_password)
+        return api.add_tag(name=name, color=color)
+
+
+def add_monitor_tag(
+    kuma_monitor_id: int,
+    tag_id: int,
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> None:
+    """Associate a tag with a Kuma monitor. Blocking."""
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
+        api.login(kuma_username, kuma_password)
+        api.add_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
+
+
+def delete_monitor_tag(
+    kuma_monitor_id: int,
+    tag_id: int,
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> None:
+    """Remove a tag from a Kuma monitor. Blocking."""
+    with UptimeKumaApi(kuma_url, timeout=15) as api:
+        api.login(kuma_username, kuma_password)
+        api.delete_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
+
+
 def test_connection(
     kuma_url: str,
     kuma_username: str,
