@@ -96,17 +96,36 @@ async def monitor_statuses(
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).all()
-    job_counts = dict(
-        db.query(KumaJob.monitor_id, func.count(KumaJob.id))
+
+    job_counts: dict[int, dict[str, int]] = {}
+    for monitor_id, status, count in (
+        db.query(KumaJob.monitor_id, KumaJob.status, func.count(KumaJob.id))
         .filter(KumaJob.monitor_id.isnot(None), KumaJob.status.in_(["pending", "failed"]))
-        .group_by(KumaJob.monitor_id)
+        .group_by(KumaJob.monitor_id, KumaJob.status)
         .all()
-    )
+    ):
+        job_counts.setdefault(monitor_id, {})[status] = count
+
+    pending_create_tag_ids = {
+        monitor_id for (monitor_id,) in (
+            db.query(KumaJob.monitor_id)
+            .filter(
+                KumaJob.monitor_id.isnot(None),
+                KumaJob.job_type == "create_tags",
+                KumaJob.status.in_(["pending", "failed"]),
+            )
+            .distinct()
+            .all()
+        )
+    }
+
     result = []
     for m in monitors:
         d = _monitor_status_dict(m, tz=tz)
-        d["pending_jobs"] = job_counts.get(m.id, 0)
-        d["failed_jobs"] = 0  # bulk endpoint uses aggregate, individual counts not needed
+        counts = job_counts.get(m.id, {})
+        d["pending_jobs"] = counts.get("pending", 0)
+        d["failed_jobs"] = counts.get("failed", 0)
+        d["pending_create_tags"] = m.id in pending_create_tag_ids
         result.append(d)
     return JSONResponse(result)
 
