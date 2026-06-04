@@ -52,6 +52,10 @@ async def lifespan(app: FastAPI):
                 name TEXT NOT NULL,
                 color TEXT NOT NULL
             )""",
+            """CREATE TABLE IF NOT EXISTS kuma_notifications (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )""",
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
@@ -82,6 +86,9 @@ async def lifespan(app: FastAPI):
 
     finally:
         db.close()
+
+    from .notification_cache import load_from_db as _load_notifications_from_db
+    _load_notifications_from_db()
 
     from .tag_cache import load_from_db as _load_tags_from_db
     _load_tags_from_db()

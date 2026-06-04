@@ -1,23 +1,38 @@
 import logging
 import threading
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-TTL = timedelta(minutes=5)
-
 _lock = threading.Lock()
 _cache: list = []
-_cache_at: datetime | None = None
 
 
 def get() -> list:
     return _cache
 
 
-def refresh() -> None:
+def load_from_db() -> None:
+    """Populate the in-memory cache from the DB. Called at startup before the scheduler runs."""
     from .database import SessionLocal
-    from .models import AppSettings
+    from .models import KumaNotification
+
+    db = SessionLocal()
+    try:
+        notifications = [{"id": n.id, "name": n.name} for n in db.query(KumaNotification).all()]
+        global _cache
+        with _lock:
+            _cache = notifications
+        logger.info("Notification cache loaded from DB: %d entries", len(notifications))
+    except Exception as exc:
+        logger.warning("Notification cache DB load failed: %s", exc)
+    finally:
+        db.close()
+
+
+def refresh(raise_on_error: bool = False) -> None:
+    """Fetch notifications from Kuma, update in-memory cache, and persist to DB."""
+    from .database import SessionLocal
+    from .models import AppSettings, KumaNotification
     from .kuma import get_notifications
 
     db = SessionLocal()
@@ -26,12 +41,20 @@ def refresh() -> None:
         if not cfg or not cfg.configured:
             return
         notifications = get_notifications(cfg.kuma_url, cfg.kuma_username, cfg.kuma_password)
-        global _cache, _cache_at
+
+        # Sync to DB: replace all rows
+        db.query(KumaNotification).delete(synchronize_session=False)
+        for n in notifications:
+            db.add(KumaNotification(id=n["id"], name=n["name"]))
+        db.commit()
+
+        global _cache
         with _lock:
-            _cache = notifications
-            _cache_at = datetime.utcnow()
-        logger.debug("Notification cache refreshed: %d entries", len(notifications))
+            _cache = [{"id": n["id"], "name": n["name"]} for n in notifications]
+        logger.debug("Notification cache refreshed from Kuma: %d entries", len(notifications))
     except Exception as exc:
         logger.warning("Notification cache refresh failed: %s", exc)
+        if raise_on_error:
+            raise
     finally:
         db.close()

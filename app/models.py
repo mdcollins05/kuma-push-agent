@@ -56,6 +56,13 @@ class KumaTag(Base):
     color = Column(String, nullable=False)
 
 
+class KumaNotification(Base):
+    __tablename__ = "kuma_notifications"
+
+    id = Column(Integer, primary_key=True)  # Kuma's notification ID, not autoincrement
+    name = Column(String, nullable=False)
+
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
 

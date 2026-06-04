@@ -90,6 +90,18 @@ async def tags_refresh(
     return JSONResponse({"ok": True})
 
 
+@router.post("/notifications/refresh")
+async def notifications_refresh(
+    user: str = Depends(require_auth),
+):
+    from ..notification_cache import refresh as refresh_notification_cache
+    try:
+        await run_in_threadpool(refresh_notification_cache, True)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    return JSONResponse({"ok": True})
+
+
 @router.get("/statuses")
 async def monitor_statuses(
     db: Session = Depends(get_db),
