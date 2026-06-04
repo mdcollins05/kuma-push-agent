@@ -117,7 +117,11 @@ def _run(job, app_cfg) -> None:
         db = SessionLocal()
         try:
             for tag in p.get("tags", []):
-                result = create_tag(tag["name"], tag["color"], url, user, pw)
+                try:
+                    result = create_tag(tag["name"], tag["color"], url, user, pw)
+                except Exception as exc:
+                    logger.warning("Failed to create tag %r: %s — skipping", tag.get("name"), exc)
+                    continue
                 new_id = result["id"]
                 # Persist the new tag ID before attempting monitor association so it's
                 # never lost if association fails or the job errors out.

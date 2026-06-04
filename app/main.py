@@ -47,6 +47,11 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE kuma_jobs ADD COLUMN next_retry_at DATETIME",
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
+            """CREATE TABLE IF NOT EXISTS kuma_tags (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL
+            )""",
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
@@ -77,6 +82,9 @@ async def lifespan(app: FastAPI):
 
     finally:
         db.close()
+
+    from .tag_cache import load_from_db as _load_tags_from_db
+    _load_tags_from_db()
 
     start_kuma_queue_processor()
     start_notification_cache_refresher()

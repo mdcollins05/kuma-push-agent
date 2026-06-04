@@ -48,6 +48,14 @@ class KumaJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class KumaTag(Base):
+    __tablename__ = "kuma_tags"
+
+    id = Column(Integer, primary_key=True)  # Kuma's tag ID, not autoincrement
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=False)
+
+
 class AppSettings(Base):
     __tablename__ = "app_settings"
 

@@ -174,8 +174,9 @@ async def monitor_new_post(
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
 
-    new_names = [n.strip() for n in new_tag_names if n.strip()]
-    new_colors = new_tag_colors[:len(new_names)]
+    new_pairs = [(n.strip(), c) for n, c in zip(new_tag_names, new_tag_colors) if n.strip()]
+    new_names = [n for n, _ in new_pairs]
+    new_colors = [c for _, c in new_pairs]
 
     monitor = Monitor(
         name=name,
@@ -235,12 +236,6 @@ async def monitor_edit_get(
                                      "failed": job.status == "failed"})
 
     selected_tag_ids = monitor.tag_ids or []
-    cached_tag_ids = {t["id"] for t in available_tags}
-    stale_tags = [tid for tid in selected_tag_ids if tid not in cached_tag_ids]
-    if stale_tags:
-        import threading
-        from ..tag_cache import refresh as _refresh_tag_cache
-        threading.Thread(target=_refresh_tag_cache, daemon=True).start()
 
     cfg = db.get(AppSettings, 1)
     return templates.TemplateResponse(request, "monitor_form.html", {
@@ -295,8 +290,9 @@ async def monitor_edit_post(
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
 
-    new_names = [n.strip() for n in new_tag_names if n.strip()]
-    new_colors = new_tag_colors[:len(new_names)]
+    new_pairs = [(n.strip(), c) for n, c in zip(new_tag_names, new_tag_colors) if n.strip()]
+    new_names = [n for n, _ in new_pairs]
+    new_colors = [c for _, c in new_pairs]
 
     old_tag_ids = set(monitor.tag_ids or [])
     new_tag_ids = set(tag_ids)

@@ -368,18 +368,41 @@
 const monitorId = {{ monitor.id }};
 
 function renderStatusCard(m) {
-  let html = '';
+  const card = document.getElementById('status-card');
+  card.innerHTML = '';
   if (m.last_check_time) {
     const badgeClass = m.last_status === 'up' ? 'badge-up' : m.last_status === 'down' ? 'badge-down' : 'badge-unknown';
-    const label = (m.last_status || '—').toUpperCase();
-    html += `<p class="mb-1"><span class="badge ${badgeClass}">${label}</span></p>`;
-    html += `<p class="small text-muted mb-1">${m.last_check_time}</p>`;
-    if (m.last_response_ms != null) html += `<p class="small mb-1">Response: ${m.last_response_ms} ms</p>`;
-    if (m.last_error) html += `<p class="small text-danger mb-0">${m.last_error}</p>`;
+    const badgeP = document.createElement('p');
+    badgeP.className = 'mb-1';
+    const badge = document.createElement('span');
+    badge.className = `badge ${badgeClass}`;
+    badge.textContent = (m.last_status || '—').toUpperCase();
+    badgeP.appendChild(badge);
+    card.appendChild(badgeP);
+
+    const timeP = document.createElement('p');
+    timeP.className = 'small text-muted mb-1';
+    timeP.textContent = m.last_check_time;
+    card.appendChild(timeP);
+
+    if (m.last_response_ms != null) {
+      const msP = document.createElement('p');
+      msP.className = 'small mb-1';
+      msP.textContent = `Response: ${m.last_response_ms} ms`;
+      card.appendChild(msP);
+    }
+    if (m.last_error) {
+      const errP = document.createElement('p');
+      errP.className = 'small text-danger mb-0';
+      errP.textContent = m.last_error;
+      card.appendChild(errP);
+    }
   } else {
-    html = '<p class="text-muted small">No check run yet.</p>';
+    const p = document.createElement('p');
+    p.className = 'text-muted small';
+    p.textContent = 'No check run yet.';
+    card.appendChild(p);
   }
-  document.getElementById('status-card').innerHTML = html;
 }
 
 const kumaConfigured = {{ 'true' if kuma_configured else 'false' }};
