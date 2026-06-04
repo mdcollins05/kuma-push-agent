@@ -83,7 +83,10 @@ async def tags_refresh(
     user: str = Depends(require_auth),
 ):
     from ..tag_cache import refresh as refresh_tag_cache
-    await run_in_threadpool(refresh_tag_cache)
+    try:
+        await run_in_threadpool(refresh_tag_cache, True)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     return JSONResponse({"ok": True})
 
 

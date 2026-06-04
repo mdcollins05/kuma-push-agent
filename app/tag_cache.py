@@ -29,7 +29,7 @@ def load_from_db() -> None:
         db.close()
 
 
-def refresh() -> None:
+def refresh(raise_on_error: bool = False) -> None:
     """Fetch tags from Kuma, update in-memory cache, and persist to DB."""
     from .database import SessionLocal
     from .models import AppSettings, KumaTag
@@ -54,5 +54,7 @@ def refresh() -> None:
         logger.debug("Tag cache refreshed from Kuma: %d entries", len(tags))
     except Exception as exc:
         logger.warning("Tag cache refresh failed: %s", exc)
+        if raise_on_error:
+            raise
     finally:
         db.close()
