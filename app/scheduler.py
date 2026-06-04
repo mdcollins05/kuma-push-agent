@@ -73,3 +73,24 @@ def start_notification_cache_refresher() -> None:
     )
     # Populate cache immediately on startup
     scheduler.add_job(refresh, "date", id="notification_cache_initial")
+
+
+def start_tag_cache_refresher() -> None:
+    from datetime import datetime, timedelta
+    from .tag_cache import refresh
+
+    scheduler.add_job(
+        refresh,
+        "interval",
+        minutes=5,
+        id="tag_cache_refresher",
+        replace_existing=True,
+    )
+    # Stagger 5 s after notification cache so concurrent Socket.IO logins don't race.
+    # Subsequent restarts serve tags instantly from DB via load_from_db() in lifespan.
+    scheduler.add_job(
+        refresh,
+        "date",
+        id="tag_cache_initial",
+        run_date=datetime.utcnow() + timedelta(seconds=5),
+    )

@@ -11,7 +11,7 @@ from .database import engine
 from .dependencies import LoginRequired, SetupRequired
 from .models import AppSettings, Base
 from .routers import api, auth, dashboard, monitors, settings as settings_router, jobs as jobs_router
-from .scheduler import scheduler, add_check_job, start_kuma_queue_processor, start_notification_cache_refresher
+from .scheduler import scheduler, add_check_job, start_kuma_queue_processor, start_notification_cache_refresher, start_tag_cache_refresher
 from .seed import seed_from_yaml
 
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +46,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE kuma_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE kuma_jobs ADD COLUMN next_retry_at DATETIME",
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
+            "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
+            """CREATE TABLE IF NOT EXISTS kuma_tags (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL
+            )""",
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
@@ -59,6 +65,15 @@ async def lifespan(app: FastAPI):
             db.add(AppSettings(id=1))
             db.commit()
 
+        # Reset failed delete jobs — if the Kuma monitor is already gone, they'll
+        # resolve immediately under the updated "does not exist" success logic.
+        from .models import KumaJob
+        db.query(KumaJob).filter_by(job_type="delete", status="failed").update(
+            {"status": "pending", "retry_count": 0, "next_retry_at": None, "error": None},
+            synchronize_session=False,
+        )
+        db.commit()
+
         seed_from_yaml(db, settings.seed_file)
 
         monitors_list = db.query(Monitor).filter_by(enabled=True).all()
@@ -68,8 +83,12 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    from .tag_cache import load_from_db as _load_tags_from_db
+    _load_tags_from_db()
+
     start_kuma_queue_processor()
     start_notification_cache_refresher()
+    start_tag_cache_refresher()
     scheduler.start()
     logger.info("Kuma Push Agent v%s started — %d monitor jobs scheduled", APP_VERSION, len(scheduler.get_jobs()))
 

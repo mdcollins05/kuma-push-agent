@@ -27,7 +27,10 @@ app/
 ├── schemas.py       — Pydantic MonitorCreate/Update/Response
 ├── dependencies.py  — get_db, require_auth, require_api_key, SetupRequired, LoginRequired
 ├── templates.py     — Jinja2Templates instance (path resolved relative to __file__)
-├── kuma.py          — All uptime-kuma-api-v2 calls (create/pause/resume/delete/test)
+├── kuma.py          — All uptime-kuma-api-v2 calls (create/pause/resume/delete/test/tags)
+├── kuma_queue.py    — Async job queue for Kuma writes; processed every 10s by APScheduler
+├── notification_cache.py — In-memory cache of Kuma notifications; refreshed every 5 min
+├── tag_cache.py     — In-memory cache of Kuma tags; refreshed every 5 min
 ├── checker.py       — run_check() — the per-monitor health check job
 ├── scheduler.py     — APScheduler singleton + add/remove/pause/resume job helpers
 ├── seed.py          — One-time YAML seed on first boot
@@ -64,6 +67,13 @@ The `app_settings` table always has exactly one row. Query with `db.get(AppSetti
 
 ### First-run gate
 `dependencies.py:require_auth()` raises `SetupRequired` if `AppSettings.ui_username is None`. `main.py` has an exception handler that redirects to `/setup`. After setup, it raises `LoginRequired` if there's no session, which redirects to `/login`.
+
+### All Kuma writes go through kuma_queue; all Kuma reads come from local cache
+**Never call `kuma.py` functions directly from async route handlers.** All write operations (create, update, pause, resume, delete, tag changes) must be enqueued as `KumaJob` records via `kuma_queue.enqueue()`. The queue processor runs every 10 seconds in an APScheduler thread and handles retries automatically.
+
+**Never fetch live data from Kuma in route handlers.** Read data (tags, notifications) is stored in in-memory caches (`tag_cache.py`, `notification_cache.py`) populated at startup and refreshed every 5 minutes by APScheduler. Route handlers call `tag_cache.get()` / `notification_cache.get()` — synchronous, zero I/O. If you add a new Kuma data type, follow the same cache module pattern.
+
+This keeps route handlers fast (no Socket.IO round-trips on page load) and tolerant of Kuma being temporarily unreachable.
 
 ### Checkbox form fields
 HTML checkboxes only send a value when checked. The routers use `Form(True)` defaults but the checkbox value is the string `"true"`. FastAPI's bool coercion handles this — `verify_ssl: bool = Form(True)` receives either the string `"true"` (checked) or nothing (unchecked, defaults to `True`). If you add new checkboxes, test this carefully.

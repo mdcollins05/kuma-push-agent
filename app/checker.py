@@ -83,6 +83,19 @@ def run_check(monitor_id: int) -> None:
                 monitor.push_token = push_token
                 monitor.kuma_synced = True
                 db.commit()
+
+                from .kuma import add_monitor_tag
+                for tag_id in (monitor.tag_ids or []):
+                    try:
+                        add_monitor_tag(
+                            kuma_monitor_id=monitor.kuma_monitor_id,
+                            tag_id=tag_id,
+                            kuma_url=app_cfg.kuma_url,
+                            kuma_username=app_cfg.kuma_username,
+                            kuma_password=app_cfg.kuma_password,
+                        )
+                    except Exception as tag_exc:
+                        logger.warning("Failed to apply tag %d to monitor %d: %s", tag_id, monitor_id, tag_exc)
             except Exception as exc:
                 logger.warning("Kuma sync failed for monitor %d: %s", monitor_id, exc)
                 return

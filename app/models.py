@@ -17,6 +17,7 @@ class Monitor(Base):
     keyword = Column(String, nullable=True)
     max_response_ms = Column(Integer, nullable=True)
     notification_ids = Column(JSON, nullable=True, default=list)
+    tag_ids = Column(JSON, nullable=True, default=list)
     verify_ssl = Column(Boolean, default=True)
 
     kuma_monitor_id = Column(Integer, nullable=True)
@@ -45,6 +46,14 @@ class KumaJob(Base):
     retry_count = Column(Integer, default=0)
     next_retry_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class KumaTag(Base):
+    __tablename__ = "kuma_tags"
+
+    id = Column(Integer, primary_key=True)  # Kuma's tag ID, not autoincrement
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=False)
 
 
 class AppSettings(Base):
