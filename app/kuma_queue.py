@@ -7,7 +7,7 @@ COMPLETED_TASK_TTL_HOURS = 24
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 60
+BASE_RETRY_SECONDS = 10  # exponential backoff: 10s, 20s, 40s
 
 _status_lock = threading.Lock()
 _last_run: datetime | None = None
@@ -77,7 +77,7 @@ def process_kuma_tasks() -> None:
                 if task.retry_count < MAX_RETRIES:
                     task.retry_count += 1
                     task.status = "pending"
-                    task.next_retry_at = datetime.utcnow() + timedelta(seconds=RETRY_DELAY_SECONDS)
+                    task.next_retry_at = datetime.utcnow() + timedelta(seconds=BASE_RETRY_SECONDS * (2 ** (task.retry_count - 1)))
                     task.error = error_msg
                 else:
                     task.status = "failed"
