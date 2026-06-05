@@ -10,8 +10,8 @@ from .config import settings, APP_VERSION
 from .database import engine
 from .dependencies import LoginRequired, SetupRequired
 from .models import AppSettings, Base
-from .routers import api, auth, dashboard, monitors, settings as settings_router, jobs as jobs_router
-from .scheduler import scheduler, add_check_job, start_kuma_queue_processor, start_notification_cache_refresher, start_tag_cache_refresher
+from .routers import api, auth, dashboard, monitors, settings as settings_router, tasks as tasks_router
+from .scheduler import scheduler, add_check_job, start_kuma_task_processor, start_notification_cache_refresher, start_tag_cache_refresher
 from .seed import seed_from_yaml
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,18 @@ async def lifespan(app: FastAPI):
     from .database import SessionLocal
     from .models import Monitor
 
+    # Rename legacy tables/columns before create_all so SQLAlchemy sees the new names
+    with engine.connect() as conn:
+        for ddl in [
+            "ALTER TABLE kuma_jobs RENAME TO kuma_tasks",
+            "ALTER TABLE kuma_tasks RENAME COLUMN job_type TO task_type",
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(ddl))
+                conn.commit()
+            except Exception:
+                pass
+
     Base.metadata.create_all(bind=engine)
 
     # Add columns introduced after initial schema (idempotent — fails silently if column exists)
@@ -30,21 +42,9 @@ async def lifespan(app: FastAPI):
         for ddl in [
             "ALTER TABLE monitors ADD COLUMN max_response_ms INTEGER",
             "ALTER TABLE monitors ADD COLUMN notification_ids TEXT",
-            """CREATE TABLE IF NOT EXISTS kuma_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_type TEXT NOT NULL,
-                monitor_id INTEGER,
-                monitor_name TEXT,
-                payload TEXT NOT NULL DEFAULT '{}',
-                status TEXT NOT NULL DEFAULT 'pending',
-                error TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                next_retry_at DATETIME,
-                created_at DATETIME
-            )""",
-            "ALTER TABLE kuma_jobs ADD COLUMN monitor_id INTEGER",
-            "ALTER TABLE kuma_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE kuma_jobs ADD COLUMN next_retry_at DATETIME",
+            "ALTER TABLE kuma_tasks ADD COLUMN monitor_id INTEGER",
+            "ALTER TABLE kuma_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE kuma_tasks ADD COLUMN next_retry_at DATETIME",
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
             """CREATE TABLE IF NOT EXISTS kuma_tags (
@@ -69,10 +69,10 @@ async def lifespan(app: FastAPI):
             db.add(AppSettings(id=1))
             db.commit()
 
-        # Reset failed delete jobs — if the Kuma monitor is already gone, they'll
+        # Reset failed delete tasks — if the Kuma monitor is already gone, they'll
         # resolve immediately under the updated "does not exist" success logic.
-        from .models import KumaJob
-        db.query(KumaJob).filter_by(job_type="delete", status="failed").update(
+        from .models import KumaTask
+        db.query(KumaTask).filter_by(task_type="delete", status="failed").update(
             {"status": "pending", "retry_count": 0, "next_retry_at": None, "error": None},
             synchronize_session=False,
         )
@@ -93,11 +93,11 @@ async def lifespan(app: FastAPI):
     from .tag_cache import load_from_db as _load_tags_from_db
     _load_tags_from_db()
 
-    start_kuma_queue_processor()
+    start_kuma_task_processor()
     start_notification_cache_refresher()
     start_tag_cache_refresher()
     scheduler.start()
-    logger.info("Kuma Push Agent v%s started — %d monitor jobs scheduled", APP_VERSION, len(scheduler.get_jobs()))
+    logger.info("Kuma Push Agent v%s started — %d monitor tasks scheduled", APP_VERSION, len(scheduler.get_jobs()))
 
     yield
 
@@ -133,4 +133,4 @@ app.include_router(dashboard.router)
 app.include_router(monitors.router)
 app.include_router(settings_router.router)
 app.include_router(api.router)
-app.include_router(jobs_router.router)
+app.include_router(tasks_router.router)

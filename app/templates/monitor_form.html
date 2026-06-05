@@ -34,20 +34,20 @@
 
 {% if monitor %}
 <div id="sync-warning"
-     class="alert {% if failed_jobs > 0 %}alert-danger{% else %}alert-warning{% endif %} py-2 d-flex align-items-center gap-2 mb-3"
-     {% if pending_jobs == 0 and failed_jobs == 0 %}style="display:none!important"{% endif %}>
-  <i id="sync-warning-icon" class="bi {% if failed_jobs > 0 %}bi-x-circle{% else %}bi-arrow-repeat{% endif %}"></i>
+     class="alert {% if failed_tasks > 0 %}alert-danger{% else %}alert-warning{% endif %} py-2 d-flex align-items-center gap-2 mb-3"
+     {% if pending_tasks == 0 and failed_tasks == 0 %}style="display:none!important"{% endif %}>
+  <i id="sync-warning-icon" class="bi {% if failed_tasks > 0 %}bi-x-circle{% else %}bi-arrow-repeat{% endif %}"></i>
   <span id="sync-warning-text">
-    {% if failed_jobs > 0 and pending_jobs > 0 %}
-      {{ failed_jobs }} sync job{{ 's' if failed_jobs != 1 else '' }} failed, {{ pending_jobs }} pending — Uptime Kuma may be out of date.
-    {% elif failed_jobs > 0 %}
-      {{ failed_jobs }} sync job{{ 's' if failed_jobs != 1 else '' }} failed — Uptime Kuma may be out of date.
+    {% if failed_tasks > 0 and pending_tasks > 0 %}
+      {{ failed_tasks }} sync task{{ 's' if failed_tasks != 1 else '' }} failed, {{ pending_tasks }} pending — Uptime Kuma may be out of date.
+    {% elif failed_tasks > 0 %}
+      {{ failed_tasks }} sync task{{ 's' if failed_tasks != 1 else '' }} failed — Uptime Kuma may be out of date.
     {% else %}
-      {{ pending_jobs }} sync job{{ 's' if pending_jobs != 1 else '' }} pending — syncing with Uptime Kuma…
+      {{ pending_tasks }} sync task{{ 's' if pending_tasks != 1 else '' }} pending — syncing with Uptime Kuma…
     {% endif %}
   </span>
   <form method="post" action="/monitors/{{ monitor.id }}/resync" class="ms-auto">
-    <button type="submit" class="btn btn-sm {% if failed_jobs > 0 %}btn-danger{% else %}btn-warning{% endif %}" id="sync-resync-btn">
+    <button type="submit" class="btn btn-sm {% if failed_tasks > 0 %}btn-danger{% else %}btn-warning{% endif %}" id="sync-resync-btn">
       <i class="bi bi-arrow-repeat"></i> Re-sync Now
     </button>
   </form>
@@ -420,8 +420,8 @@ function renderKumaSync(m) {
 
 function renderSyncWarning(m) {
   const banner = document.getElementById('sync-warning');
-  const p = m.pending_jobs || 0;
-  const f = m.failed_jobs || 0;
+  const p = m.pending_tasks || 0;
+  const f = m.failed_tasks || 0;
   if (p === 0 && f === 0) {
     banner.style.setProperty('display', 'none', 'important');
     return;
@@ -433,11 +433,11 @@ function renderSyncWarning(m) {
   document.getElementById('sync-resync-btn').className = `btn btn-sm ${hasFailed ? 'btn-danger' : 'btn-warning'}`;
   let text;
   if (hasFailed && p > 0)
-    text = `${f} sync job${f !== 1 ? 's' : ''} failed, ${p} pending — Uptime Kuma may be out of date.`;
+    text = `${f} sync task${f !== 1 ? 's' : ''} failed, ${p} pending — Uptime Kuma may be out of date.`;
   else if (hasFailed)
-    text = `${f} sync job${f !== 1 ? 's' : ''} failed — Uptime Kuma may be out of date.`;
+    text = `${f} sync task${f !== 1 ? 's' : ''} failed — Uptime Kuma may be out of date.`;
   else
-    text = `${p} sync job${p !== 1 ? 's' : ''} pending — syncing with Uptime Kuma…`;
+    text = `${p} sync task${p !== 1 ? 's' : ''} pending — syncing with Uptime Kuma…`;
   document.getElementById('sync-warning-text').textContent = text;
 }
 

@@ -1,14 +1,24 @@
 import logging
 import threading
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cache: list = []
+_cache_at: datetime | None = None
+_last_error: str | None = None
 
 
 def get() -> list:
     return _cache
+
+
+def status() -> dict:
+    return {
+        "last_run": _cache_at.isoformat() if _cache_at else None,
+        "last_error": _last_error,
+    }
 
 
 def load_from_db() -> None:
@@ -41,13 +51,14 @@ def refresh(raise_on_error: bool = False) -> None:
     from .models import AppSettings, KumaNotification
     from .kuma import get_notifications
 
+    global _cache, _cache_at, _last_error
+
     db = SessionLocal()
     try:
         cfg = db.get(AppSettings, 1)
         if not cfg or not cfg.configured:
             db.query(KumaNotification).delete(synchronize_session=False)
             db.commit()
-            global _cache
             with _lock:
                 _cache = []
             return
@@ -61,9 +72,14 @@ def refresh(raise_on_error: bool = False) -> None:
 
         with _lock:
             _cache = [{"id": n["id"], "name": n["name"]} for n in notifications]
+            _cache_at = datetime.utcnow()
+            _last_error = None
         logger.debug("Notification cache refreshed from Kuma: %d entries", len(notifications))
     except Exception as exc:
         logger.warning("Notification cache refresh failed: %s", exc)
+        with _lock:
+            _cache_at = datetime.utcnow()
+            _last_error = f"{type(exc).__name__}: {exc}"
         if raise_on_error:
             raise
     finally:

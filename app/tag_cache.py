@@ -1,14 +1,24 @@
 import logging
 import threading
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cache: list = []
+_last_run: datetime | None = None
+_last_error: str | None = None
 
 
 def get() -> list:
     return _cache
+
+
+def status() -> dict:
+    return {
+        "last_run": _last_run.isoformat() if _last_run else None,
+        "last_error": _last_error,
+    }
 
 
 def load_from_db() -> None:
@@ -41,6 +51,8 @@ def refresh(raise_on_error: bool = False) -> None:
     from .models import AppSettings, KumaTag
     from .kuma import get_tags
 
+    global _cache, _last_run, _last_error
+
     db = SessionLocal()
     try:
         cfg = db.get(AppSettings, 1)
@@ -61,9 +73,14 @@ def refresh(raise_on_error: bool = False) -> None:
 
         with _lock:
             _cache = [{"id": t["id"], "name": t["name"], "color": t["color"]} for t in tags]
+            _last_run = datetime.utcnow()
+            _last_error = None
         logger.debug("Tag cache refreshed from Kuma: %d entries", len(tags))
     except Exception as exc:
         logger.warning("Tag cache refresh failed: %s", exc)
+        with _lock:
+            _last_run = datetime.utcnow()
+            _last_error = f"{type(exc).__name__}: {exc}"
         if raise_on_error:
             raise
     finally:
