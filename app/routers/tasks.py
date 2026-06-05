@@ -117,7 +117,7 @@ async def tasks_status(
                 "monitor_name": t.monitor_name,
                 "status": t.status,
                 "error": t.error,
-                "created_at": t.created_at.strftime("%H:%M:%S"),
+                "created_at": t.created_at.strftime("%H:%M:%S") if t.created_at else None,
             }
             for t in tasks
         ],
