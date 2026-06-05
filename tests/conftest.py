@@ -60,3 +60,32 @@ def client():
 
 
 HEADERS = {"X-API-Key": "test-key"}
+
+
+@pytest.fixture
+def db_session(client):
+    """Yield a session against the test DB; rollback after each test."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.rollback()
+        db.close()
+
+
+# Expose the factory so cache tests can patch app.database.SessionLocal
+testing_session_factory = TestingSessionLocal
+
+
+@pytest.fixture(autouse=True)
+def reset_cache_module_state():
+    """Reset in-memory cache module state before each test to prevent cross-test pollution."""
+    import app.notification_cache as nc
+    import app.tag_cache as tc
+    nc._cache = []
+    nc._last_run = None
+    nc._last_error = None
+    tc._cache = []
+    tc._last_run = None
+    tc._last_error = None
+    yield
