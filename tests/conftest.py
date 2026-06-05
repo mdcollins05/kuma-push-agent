@@ -60,3 +60,18 @@ def client():
 
 
 HEADERS = {"X-API-Key": "test-key"}
+
+
+@pytest.fixture
+def db_session(client):
+    """Yield a session against the test DB; rollback after each test."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.rollback()
+        db.close()
+
+
+# Expose the factory so cache tests can patch app.database.SessionLocal
+testing_session_factory = TestingSessionLocal
