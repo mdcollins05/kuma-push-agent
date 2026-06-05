@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Job History — Kuma Push Agent{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="fw-bold mb-0">Job History</h5>
+  <a href="/settings" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> Settings
+  </a>
+</div>
+
+{% set status_counts = {"pending": 0, "failed": 0, "done": 0, "cancelled": 0} %}
+{% for j in jobs %}
+  {% if j.status in status_counts %}
+    {% set _ = status_counts.update({j.status: status_counts[j.status] + 1}) %}
+  {% endif %}
+{% endfor %}
+
+<div class="d-flex gap-2 mb-3 flex-wrap" id="filter-tabs">
+  <button class="btn btn-sm btn-primary active" data-filter="all">
+    All <span class="badge bg-white text-dark ms-1">{{ jobs|length }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-warning" data-filter="pending">
+    Pending <span class="badge bg-warning text-dark ms-1">{{ status_counts.pending }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-danger" data-filter="failed">
+    Failed <span class="badge bg-danger ms-1">{{ status_counts.failed }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-success" data-filter="done">
+    Done <span class="badge bg-success ms-1">{{ status_counts.done }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-secondary" data-filter="cancelled">
+    Cancelled <span class="badge bg-secondary ms-1">{{ status_counts.cancelled }}</span>
+  </button>
+  <span class="ms-auto small text-muted align-self-center" id="last-updated"></span>
+</div>
+
+<div class="card p-0">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" id="jobs-table">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3" style="width:160px">Time</th>
+          <th style="width:120px">Type</th>
+          <th>Monitor</th>
+          <th style="width:110px">Status</th>
+          <th style="width:70px" class="text-center">Retries</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="jobs-body">
+        {% for j in jobs %}
+        <tr data-status="{{ j.status }}">
+          <td class="ps-3 text-muted small text-nowrap">{{ j.created_at | local_dt(tz) }}</td>
+          <td><code class="small">{{ j.job_type }}</code></td>
+          <td class="small">
+            {% if j.monitor_id %}
+              <a href="/monitors/{{ j.monitor_id }}/edit" class="text-decoration-none">{{ j.monitor_name or j.monitor_id }}</a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if j.status == "pending" %}
+              <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>
+            {% elif j.status == "failed" %}
+              <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
+            {% elif j.status == "done" %}
+              <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Done</span>
+            {% elif j.status == "cancelled" %}
+              <span class="badge bg-secondary"><i class="bi bi-slash-circle me-1"></i>Cancelled</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ j.status }}</span>
+            {% endif %}
+          </td>
+          <td class="text-center small">{{ j.retry_count or 0 }}</td>
+          <td class="small text-danger">
+            {% if j.error %}<span title="{{ j.error }}">{{ j.error[:120] }}{% if j.error|length > 120 %}…{% endif %}</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr id="empty-row">
+          <td colspan="6" class="text-center text-muted py-4">No jobs found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const TZ = {{ tz | tojson }};
+let activeFilter = 'all';
+
+document.getElementById('filter-tabs').addEventListener('click', function(e) {
+  const btn = e.target.closest('button[data-filter]');
+  if (!btn) return;
+  activeFilter = btn.dataset.filter;
+  document.querySelectorAll('#filter-tabs button').forEach(b => {
+    b.classList.toggle('active', b === btn);
+    // Swap solid/outline
+    const base = b.dataset.filter === 'all' ? 'btn-primary' :
+                 b.dataset.filter === 'pending' ? 'btn-warning' :
+                 b.dataset.filter === 'failed' ? 'btn-danger' :
+                 b.dataset.filter === 'done' ? 'btn-success' : 'btn-secondary';
+    const outline = 'btn-outline-' + (base.replace('btn-', ''));
+    if (b === btn) { b.classList.add(base); b.classList.remove(outline); }
+    else           { b.classList.remove(base); b.classList.add(outline); }
+  });
+  applyFilter();
+});
+
+function applyFilter() {
+  document.querySelectorAll('#jobs-body tr[data-status]').forEach(row => {
+    row.style.display = (activeFilter === 'all' || row.dataset.status === activeFilter) ? '' : 'none';
+  });
+}
+
+const STATUS_BADGE = {
+  pending:   '<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>',
+  failed:    '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>',
+  done:      '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Done</span>',
+  cancelled: '<span class="badge bg-secondary"><i class="bi bi-slash-circle me-1"></i>Cancelled</span>',
+};
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '—';
+  try {
+    return new Date(isoStr + 'Z').toLocaleString('sv-SE', {timeZone: TZ}).replace('T', ' ');
+  } catch { return isoStr; }
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/jobs/data');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    // Update filter badge counts
+    const counts = {all: data.jobs.length, pending: 0, failed: 0, done: 0, cancelled: 0};
+    data.jobs.forEach(j => { if (j.status in counts) counts[j.status]++; });
+    document.querySelectorAll('#filter-tabs button[data-filter]').forEach(btn => {
+      const f = btn.dataset.filter;
+      const badge = btn.querySelector('.badge');
+      if (badge) badge.textContent = counts[f] ?? 0;
+    });
+
+    const tbody = document.getElementById('jobs-body');
+    if (data.jobs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No jobs found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.jobs.map(j => {
+      const badge = STATUS_BADGE[j.status] || `<span class="badge bg-secondary">${j.status}</span>`;
+      const monitorCell = j.monitor_id
+        ? `<a href="/monitors/${j.monitor_id}/edit" class="text-decoration-none">${escHtml(j.monitor_name || String(j.monitor_id))}</a>`
+        : '<span class="text-muted">—</span>';
+      const errText = j.error ? escHtml(j.error.length > 120 ? j.error.slice(0, 120) + '…' : j.error) : '';
+      const errCell = j.error ? `<span title="${escHtml(j.error)}">${errText}</span>` : '';
+      return `<tr data-status="${j.status}">
+        <td class="ps-3 text-muted small text-nowrap">${fmtTime(j.created_at)}</td>
+        <td><code class="small">${escHtml(j.job_type)}</code></td>
+        <td class="small">${monitorCell}</td>
+        <td>${badge}</td>
+        <td class="text-center small">${j.retry_count || 0}</td>
+        <td class="small text-danger">${errCell}</td>
+      </tr>`;
+    }).join('');
+
+    applyFilter();
+
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('last-updated').textContent = `Updated ${now}`;
+  } catch (e) { /* silent */ }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+{% endblock %}
