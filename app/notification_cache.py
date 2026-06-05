@@ -14,12 +14,18 @@ def get() -> list:
 def load_from_db() -> None:
     """Populate the in-memory cache from the DB. Called at startup before the scheduler runs."""
     from .database import SessionLocal
-    from .models import KumaNotification
+    from .models import AppSettings, KumaNotification
 
     db = SessionLocal()
     try:
-        notifications = [{"id": n.id, "name": n.name} for n in db.query(KumaNotification).all()]
+        cfg = db.get(AppSettings, 1)
         global _cache
+        if not cfg or not cfg.configured:
+            with _lock:
+                _cache = []
+            logger.info("Notification cache skipped: Kuma not configured")
+            return
+        notifications = [{"id": n.id, "name": n.name} for n in db.query(KumaNotification).all()]
         with _lock:
             _cache = notifications
         logger.info("Notification cache loaded from DB: %d entries", len(notifications))
@@ -39,6 +45,11 @@ def refresh(raise_on_error: bool = False) -> None:
     try:
         cfg = db.get(AppSettings, 1)
         if not cfg or not cfg.configured:
+            db.query(KumaNotification).delete(synchronize_session=False)
+            db.commit()
+            global _cache
+            with _lock:
+                _cache = []
             return
         notifications = get_notifications(cfg.kuma_url, cfg.kuma_username, cfg.kuma_password)
 
@@ -48,7 +59,6 @@ def refresh(raise_on_error: bool = False) -> None:
             db.add(KumaNotification(id=n["id"], name=n["name"]))
         db.commit()
 
-        global _cache
         with _lock:
             _cache = [{"id": n["id"], "name": n["name"]} for n in notifications]
         logger.debug("Notification cache refreshed from Kuma: %d entries", len(notifications))

@@ -14,12 +14,18 @@ def get() -> list:
 def load_from_db() -> None:
     """Populate the in-memory cache from the DB. Called at startup before the scheduler runs."""
     from .database import SessionLocal
-    from .models import KumaTag
+    from .models import AppSettings, KumaTag
 
     db = SessionLocal()
     try:
-        tags = [{"id": t.id, "name": t.name, "color": t.color} for t in db.query(KumaTag).all()]
+        cfg = db.get(AppSettings, 1)
         global _cache
+        if not cfg or not cfg.configured:
+            with _lock:
+                _cache = []
+            logger.info("Tag cache skipped: Kuma not configured")
+            return
+        tags = [{"id": t.id, "name": t.name, "color": t.color} for t in db.query(KumaTag).all()]
         with _lock:
             _cache = tags
         logger.info("Tag cache loaded from DB: %d entries", len(tags))
@@ -39,6 +45,11 @@ def refresh(raise_on_error: bool = False) -> None:
     try:
         cfg = db.get(AppSettings, 1)
         if not cfg or not cfg.configured:
+            db.query(KumaTag).delete(synchronize_session=False)
+            db.commit()
+            global _cache
+            with _lock:
+                _cache = []
             return
         tags = get_tags(cfg.kuma_url, cfg.kuma_username, cfg.kuma_password)
 
@@ -48,7 +59,6 @@ def refresh(raise_on_error: bool = False) -> None:
             db.add(KumaTag(id=t["id"], name=t["name"], color=t["color"]))
         db.commit()
 
-        global _cache
         with _lock:
             _cache = [{"id": t["id"], "name": t["name"], "color": t["color"]} for t in tags]
         logger.debug("Tag cache refreshed from Kuma: %d entries", len(tags))
