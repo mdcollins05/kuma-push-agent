@@ -1,23 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Job History — Kuma Push Agent{% endblock %}
+{% block title %}Tasks — Kuma Push Agent{% endblock %}
 {% block content %}
 <div class="d-flex align-items-center justify-content-between mb-4">
-  <h5 class="fw-bold mb-0">Job History</h5>
+  <h5 class="fw-bold mb-0">Tasks</h5>
   <a href="/settings" class="btn btn-sm btn-outline-secondary">
     <i class="bi bi-arrow-left"></i> Settings
   </a>
 </div>
 
+<div class="card mb-4">
+  <div class="card-header fw-semibold small">Recurring Tasks</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle" id="system-tasks-table">
+      <thead>
+        <tr>
+          <th class="ps-3">Task</th>
+          <th style="width:100px">Interval</th>
+          <th style="width:170px">Last Run</th>
+          <th style="width:170px">Next Run</th>
+          <th style="width:90px">Status</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="system-tasks-body">
+        <tr><td colspan="6" class="text-center text-muted py-3 small">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% set status_counts = {"pending": 0, "failed": 0, "done": 0, "cancelled": 0} %}
-{% for j in jobs %}
-  {% if j.status in status_counts %}
-    {% set _ = status_counts.update({j.status: status_counts[j.status] + 1}) %}
+{% for t in tasks %}
+  {% if t.status in status_counts %}
+    {% set _ = status_counts.update({t.status: status_counts[t.status] + 1}) %}
   {% endif %}
 {% endfor %}
 
+<h6 class="fw-semibold mt-2 mb-3">Task History</h6>
 <div class="d-flex gap-2 mb-3 flex-wrap" id="filter-tabs">
   <button class="btn btn-sm btn-primary active" data-filter="all">
-    All <span class="badge bg-white text-dark ms-1">{{ jobs|length }}</span>
+    All <span class="badge bg-white text-dark ms-1">{{ tasks|length }}</span>
   </button>
   <button class="btn btn-sm btn-outline-warning" data-filter="pending">
     Pending <span class="badge bg-warning text-dark ms-1">{{ status_counts.pending }}</span>
@@ -36,8 +58,8 @@
 
 <div class="card p-0">
   <div class="table-responsive">
-    <table class="table table-sm table-hover mb-0 align-middle" id="jobs-table">
-      <thead class="table-light">
+    <table class="table table-sm table-hover mb-0 align-middle" id="tasks-table">
+      <thead>
         <tr>
           <th class="ps-3" style="width:160px">Time</th>
           <th style="width:120px">Type</th>
@@ -47,39 +69,39 @@
           <th>Error</th>
         </tr>
       </thead>
-      <tbody id="jobs-body">
-        {% for j in jobs %}
-        <tr data-status="{{ j.status }}">
-          <td class="ps-3 text-muted small text-nowrap">{{ j.created_at | local_dt(tz) }}</td>
-          <td><code class="small">{{ j.job_type }}</code></td>
+      <tbody id="tasks-body">
+        {% for t in tasks %}
+        <tr data-status="{{ t.status }}">
+          <td class="ps-3 text-muted small text-nowrap">{{ t.created_at | local_dt(tz) }}</td>
+          <td><code class="small">{{ t.task_type }}</code></td>
           <td class="small">
-            {% if j.monitor_id %}
-              <a href="/monitors/{{ j.monitor_id }}/edit" class="text-decoration-none">{{ j.monitor_name or j.monitor_id }}</a>
+            {% if t.monitor_id %}
+              <a href="/monitors/{{ t.monitor_id }}/edit" class="text-decoration-none">{{ t.monitor_name or t.monitor_id }}</a>
             {% else %}
               <span class="text-muted">—</span>
             {% endif %}
           </td>
           <td>
-            {% if j.status == "pending" %}
+            {% if t.status == "pending" %}
               <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>
-            {% elif j.status == "failed" %}
+            {% elif t.status == "failed" %}
               <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
-            {% elif j.status == "done" %}
+            {% elif t.status == "done" %}
               <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Done</span>
-            {% elif j.status == "cancelled" %}
+            {% elif t.status == "cancelled" %}
               <span class="badge bg-secondary"><i class="bi bi-slash-circle me-1"></i>Cancelled</span>
             {% else %}
-              <span class="badge bg-secondary">{{ j.status }}</span>
+              <span class="badge bg-secondary">{{ t.status }}</span>
             {% endif %}
           </td>
-          <td class="text-center small">{{ j.retry_count or 0 }}</td>
+          <td class="text-center small">{{ t.retry_count or 0 }}</td>
           <td class="small text-danger">
-            {% if j.error %}<span title="{{ j.error }}">{{ j.error[:120] }}{% if j.error|length > 120 %}…{% endif %}</span>{% endif %}
+            {% if t.error %}<span title="{{ t.error }}">{{ t.error[:120] }}{% if t.error|length > 120 %}…{% endif %}</span>{% endif %}
           </td>
         </tr>
         {% else %}
         <tr id="empty-row">
-          <td colspan="6" class="text-center text-muted py-4">No jobs found.</td>
+          <td colspan="6" class="text-center text-muted py-4">No tasks found.</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -110,7 +132,7 @@ document.getElementById('filter-tabs').addEventListener('click', function(e) {
 });
 
 function applyFilter() {
-  document.querySelectorAll('#jobs-body tr[data-status]').forEach(row => {
+  document.querySelectorAll('#tasks-body tr[data-status]').forEach(row => {
     row.style.display = (activeFilter === 'all' || row.dataset.status === activeFilter) ? '' : 'none';
   });
 }
@@ -125,44 +147,45 @@ const STATUS_BADGE = {
 function fmtTime(isoStr) {
   if (!isoStr) return '—';
   try {
-    return new Date(isoStr + 'Z').toLocaleString('sv-SE', {timeZone: TZ}).replace('T', ' ');
+    const s = /Z|[+-]\d{2}:\d{2}$/.test(isoStr) ? isoStr : isoStr + 'Z';
+    return new Date(s).toLocaleString('sv-SE', {timeZone: TZ}).replace('T', ' ');
   } catch { return isoStr; }
 }
 
 async function refresh() {
   try {
-    const resp = await fetch('/jobs/data');
+    const resp = await fetch('/tasks/data');
     if (!resp.ok) return;
     const data = await resp.json();
 
     // Update filter badge counts
-    const counts = {all: data.jobs.length, pending: 0, failed: 0, done: 0, cancelled: 0};
-    data.jobs.forEach(j => { if (j.status in counts) counts[j.status]++; });
+    const counts = {all: data.tasks.length, pending: 0, failed: 0, done: 0, cancelled: 0};
+    data.tasks.forEach(t => { if (t.status in counts) counts[t.status]++; });
     document.querySelectorAll('#filter-tabs button[data-filter]').forEach(btn => {
       const f = btn.dataset.filter;
       const badge = btn.querySelector('.badge');
       if (badge) badge.textContent = counts[f] ?? 0;
     });
 
-    const tbody = document.getElementById('jobs-body');
-    if (data.jobs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No jobs found.</td></tr>';
+    const tbody = document.getElementById('tasks-body');
+    if (data.tasks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No tasks found.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = data.jobs.map(j => {
-      const badge = STATUS_BADGE[j.status] || `<span class="badge bg-secondary">${j.status}</span>`;
-      const monitorCell = j.monitor_id
-        ? `<a href="/monitors/${j.monitor_id}/edit" class="text-decoration-none">${escHtml(j.monitor_name || String(j.monitor_id))}</a>`
+    tbody.innerHTML = data.tasks.map(t => {
+      const badge = STATUS_BADGE[t.status] || `<span class="badge bg-secondary">${t.status}</span>`;
+      const monitorCell = t.monitor_id
+        ? `<a href="/monitors/${t.monitor_id}/edit" class="text-decoration-none">${escHtml(t.monitor_name || String(t.monitor_id))}</a>`
         : '<span class="text-muted">—</span>';
-      const errText = j.error ? escHtml(j.error.length > 120 ? j.error.slice(0, 120) + '…' : j.error) : '';
-      const errCell = j.error ? `<span title="${escHtml(j.error)}">${errText}</span>` : '';
-      return `<tr data-status="${j.status}">
-        <td class="ps-3 text-muted small text-nowrap">${fmtTime(j.created_at)}</td>
-        <td><code class="small">${escHtml(j.job_type)}</code></td>
+      const errText = t.error ? escHtml(t.error.length > 120 ? t.error.slice(0, 120) + '…' : t.error) : '';
+      const errCell = t.error ? `<span title="${escHtml(t.error)}">${errText}</span>` : '';
+      return `<tr data-status="${t.status}">
+        <td class="ps-3 text-muted small text-nowrap">${fmtTime(t.created_at)}</td>
+        <td><code class="small">${escHtml(t.task_type)}</code></td>
         <td class="small">${monitorCell}</td>
         <td>${badge}</td>
-        <td class="text-center small">${j.retry_count || 0}</td>
+        <td class="text-center small">${t.retry_count || 0}</td>
         <td class="small text-danger">${errCell}</td>
       </tr>`;
     }).join('');
@@ -178,7 +201,37 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+async function refreshSystemTasks() {
+  try {
+    const resp = await fetch('/tasks/system-status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const tbody = document.getElementById('system-tasks-body');
+    tbody.innerHTML = data.tasks.map(t => {
+      const ok = !t.last_error;
+      const badge = ok
+        ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>'
+        : '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Error</span>';
+      const lastRun = t.last_run ? fmtTime(t.last_run) : '<span class="text-muted">—</span>';
+      const nextRun = t.next_run ? fmtTime(t.next_run) : '<span class="text-muted">—</span>';
+      const errText = t.last_error
+        ? `<span class="text-danger" title="${escHtml(t.last_error)}">${escHtml(t.last_error.length > 120 ? t.last_error.slice(0, 120) + '…' : t.last_error)}</span>`
+        : '';
+      return `<tr>
+        <td class="ps-3 small">${escHtml(t.label)}</td>
+        <td class="small text-muted">${escHtml(t.interval)}</td>
+        <td class="small text-muted text-nowrap">${lastRun}</td>
+        <td class="small text-muted text-nowrap">${nextRun}</td>
+        <td>${badge}</td>
+        <td class="small">${errText}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* silent */ }
+}
+
 refresh();
+refreshSystemTasks();
 setInterval(refresh, 5000);
+setInterval(refreshSystemTasks, 5000);
 </script>
 {% endblock %}

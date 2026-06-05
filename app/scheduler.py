@@ -49,14 +49,14 @@ def resume_check_job(monitor_id: int) -> None:
         scheduler.resume_job(job_id)
 
 
-def start_kuma_queue_processor() -> None:
-    from .kuma_queue import process_kuma_jobs
+def start_kuma_task_processor() -> None:
+    from .kuma_queue import process_kuma_tasks
 
     scheduler.add_job(
-        process_kuma_jobs,
+        process_kuma_tasks,
         "interval",
         seconds=10,
-        id="kuma_queue_processor",
+        id="kuma_task_processor",
         replace_existing=True,
     )
 
