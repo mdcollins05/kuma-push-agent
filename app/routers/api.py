@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,9 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, require_api_key
 from ..models import AppSettings, Monitor
+from ..monitor_status import monitor_status_dict
+from ..notification_cache import get as get_notifications
+from ..passwords import hash_password
 from ..schemas import (
     KumaSettingsRequest, KumaSettingsResponse,
     MonitorCreate, MonitorResponse, MonitorStatus, MonitorUpdate,
@@ -14,6 +18,8 @@ from ..schemas import (
     TagCreate, TagResponse,
 )
 from ..scheduler import add_check_job, remove_check_job
+from ..tag_cache import get as get_tags
+from ..timezones import TIMEZONE_NAMES
 
 # Unauthenticated — only hosts bootstrap endpoints
 public_router = APIRouter(prefix="/api/v1")
@@ -37,13 +43,10 @@ _404 = {404: {"description": "Monitor not found"}}
     responses={409: {"description": "Already configured"}},
 )
 def api_setup(payload: SetupRequest, db: Session = Depends(get_db)):
-    import uuid
-    import bcrypt
     app_settings = db.get(AppSettings, 1)
     if app_settings and app_settings.ui_username:
         raise HTTPException(status_code=409, detail="Application is already configured")
 
-    from ..timezones import TIMEZONE_NAMES
     timezone = payload.timezone if payload.timezone in TIMEZONE_NAMES else "UTC"
 
     if not app_settings:
@@ -52,7 +55,7 @@ def api_setup(payload: SetupRequest, db: Session = Depends(get_db)):
 
     api_key = str(uuid.uuid4())
     app_settings.ui_username = payload.username
-    app_settings.ui_password_hash = bcrypt.hashpw(payload.password.encode(), bcrypt.gensalt()).decode()
+    app_settings.ui_password_hash = hash_password(payload.password)
     app_settings.api_key = api_key
     app_settings.timezone = timezone
     db.commit()
@@ -68,6 +71,10 @@ def api_setup(payload: SetupRequest, db: Session = Depends(get_db)):
 )
 def configure_kuma(payload: KumaSettingsRequest, db: Session = Depends(get_db)):
     app_settings = db.get(AppSettings, 1)
+    if not app_settings or not app_settings.ui_username:
+        raise HTTPException(status_code=409, detail="Application is not set up yet")
+    if not payload.kuma_url.strip() or not payload.kuma_username.strip():
+        raise HTTPException(status_code=422, detail="kuma_url and kuma_username are required")
     app_settings.kuma_url = payload.kuma_url.rstrip("/")
     app_settings.kuma_username = payload.kuma_username
     if payload.kuma_password is not None:
@@ -89,7 +96,6 @@ def configure_kuma(payload: KumaSettingsRequest, db: Session = Depends(get_db)):
     description="Returns all Uptime Kuma tags from the local cache. The cache refreshes every 5 minutes.",
 )
 def list_tags():
-    from ..tag_cache import get as get_tags
     return get_tags()
 
 
@@ -103,7 +109,6 @@ def list_tags():
     responses={503: {"description": "Uptime Kuma not configured"}},
 )
 async def create_tag(payload: TagCreate, db: Session = Depends(get_db)):
-    from fastapi.concurrency import run_in_threadpool
     from ..kuma import create_tag as kuma_create_tag
     from ..tag_cache import refresh as refresh_tags
     cfg = db.get(AppSettings, 1)
@@ -128,8 +133,7 @@ async def create_tag(payload: TagCreate, db: Session = Depends(get_db)):
     description="Returns all Uptime Kuma notification channels from the local cache. The cache refreshes every 5 minutes.",
 )
 def list_notifications():
-    from ..notification_cache import get as get_notifications
-    return [{"id": n["id"], "name": n["name"]} for n in get_notifications()]
+    return [NotificationResponse(id=n["id"], name=n["name"]) for n in get_notifications()]
 
 
 @router.get(
@@ -144,6 +148,8 @@ def list_monitors(db: Session = Depends(get_db)):
     return [_to_response(m) for m in monitors]
 
 
+# /monitors/statuses must be registered before /monitors/{monitor_id} so FastAPI's
+# int coercion on {monitor_id} rejects the literal string "statuses" correctly.
 @router.get(
     "/monitors/statuses",
     response_model=List[MonitorStatus],
@@ -152,11 +158,10 @@ def list_monitors(db: Session = Depends(get_db)):
     description="Returns live status fields for all monitors — last check time, last status, response time, error, and Kuma sync state.",
 )
 def list_monitor_statuses(db: Session = Depends(get_db)):
-    from .monitors import _monitor_status_dict
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).order_by(Monitor.name).all()
-    return [_monitor_status_dict(m, db=db, tz=tz) for m in monitors]
+    return [monitor_status_dict(m, db=db, tz=tz) for m in monitors]
 
 
 @router.get(
@@ -168,13 +173,12 @@ def list_monitor_statuses(db: Session = Depends(get_db)):
     responses=_404,
 )
 def get_monitor_status(monitor_id: int, db: Session = Depends(get_db)):
-    from .monitors import _monitor_status_dict
     monitor = db.get(Monitor, monitor_id)
     if not monitor:
         raise HTTPException(status_code=404, detail="Monitor not found")
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
-    return _monitor_status_dict(monitor, db=db, tz=tz)
+    return monitor_status_dict(monitor, db=db, tz=tz)
 
 
 @router.get(
