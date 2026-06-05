@@ -59,7 +59,6 @@ def refresh(raise_on_error: bool = False) -> None:
         if not cfg or not cfg.configured:
             db.query(KumaTag).delete(synchronize_session=False)
             db.commit()
-            global _cache
             with _lock:
                 _cache = []
             return

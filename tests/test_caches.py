@@ -34,7 +34,9 @@ class TestNotificationCacheLoadFromDb:
         from app.models import AppSettings
         import app.notification_cache as nc
 
-        db_session.query(AppSettings).filter_by(id=1).update({"configured": True, "kuma_url": "http://kuma"})
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
         db_session.add(KumaNotification(id=1, name="Email"))
         db_session.add(KumaNotification(id=2, name="Slack"))
         db_session.commit()
@@ -49,7 +51,9 @@ class TestNotificationCacheLoadFromDb:
             assert {"id": 2, "name": "Slack"} in cache
         finally:
             db_session.query(KumaNotification).delete()
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
             db_session.commit()
 
 
@@ -72,10 +76,11 @@ class TestNotificationCacheRefresh:
         from app.models import AppSettings
         import app.notification_cache as nc
 
-        db_session.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db_session.commit()
 
         kuma_data = [{"id": 5, "name": "Webhook"}, {"id": 6, "name": "PagerDuty"}]
@@ -90,17 +95,22 @@ class TestNotificationCacheRefresh:
             assert db_session.query(KumaNotification).filter_by(id=5).count() == 1
         finally:
             db_session.query(KumaNotification).delete()
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db_session.commit()
 
     def test_raise_on_error_propagates_exception(self, db_session):
         from app.models import AppSettings
         import app.notification_cache as nc
 
-        db_session.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db_session.commit()
 
         try:
@@ -108,7 +118,11 @@ class TestNotificationCacheRefresh:
                 with pytest.raises(RuntimeError, match="connection refused"):
                     nc.refresh(raise_on_error=True)
         finally:
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db_session.commit()
 
 
@@ -130,7 +144,9 @@ class TestTagCacheLoadFromDb:
         from app.models import AppSettings
         import app.tag_cache as tc
 
-        db_session.query(AppSettings).filter_by(id=1).update({"configured": True, "kuma_url": "http://kuma"})
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
         db_session.add(KumaTag(id=1, name="prod", color="#f00"))
         db_session.add(KumaTag(id=2, name="staging", color="#0f0"))
         db_session.commit()
@@ -144,7 +160,9 @@ class TestTagCacheLoadFromDb:
             assert {"id": 1, "name": "prod", "color": "#f00"} in cache
         finally:
             db_session.query(KumaTag).delete()
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
             db_session.commit()
 
 
@@ -166,10 +184,11 @@ class TestTagCacheRefresh:
         from app.models import AppSettings
         import app.tag_cache as tc
 
-        db_session.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db_session.commit()
 
         kuma_data = [{"id": 7, "name": "prod", "color": "#f00"}]
@@ -184,17 +203,22 @@ class TestTagCacheRefresh:
             assert db_session.query(KumaTag).filter_by(id=7).count() == 1
         finally:
             db_session.query(KumaTag).delete()
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db_session.commit()
 
     def test_raise_on_error_propagates_exception(self, db_session):
         from app.models import AppSettings
         import app.tag_cache as tc
 
-        db_session.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db_session.commit()
 
         try:
@@ -202,7 +226,11 @@ class TestTagCacheRefresh:
                 with pytest.raises(RuntimeError, match="timeout"):
                     tc.refresh(raise_on_error=True)
         finally:
-            db_session.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db_session.commit()
 
 
@@ -225,10 +253,11 @@ class TestRefreshEndpoints:
     def test_notifications_refresh_kuma_failure_returns_502(self, client):
         from app.models import AppSettings
         db = testing_session_factory()
-        db.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db.commit()
         db.close()
 
@@ -239,17 +268,22 @@ class TestRefreshEndpoints:
             assert resp.json()["ok"] is False
         finally:
             db = testing_session_factory()
-            db.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db.commit()
             db.close()
 
     def test_tags_refresh_kuma_failure_returns_502(self, client):
         from app.models import AppSettings
         db = testing_session_factory()
-        db.query(AppSettings).filter_by(id=1).update({
-            "configured": True, "kuma_url": "http://kuma",
-            "kuma_username": "u", "kuma_password": "p",
-        })
+        cfg = db.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
         db.commit()
         db.close()
 
@@ -260,6 +294,10 @@ class TestRefreshEndpoints:
             assert resp.json()["ok"] is False
         finally:
             db = testing_session_factory()
-            db.query(AppSettings).filter_by(id=1).update({"configured": False, "kuma_url": None, "kuma_username": None, "kuma_password": None})
+            cfg = db.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
             db.commit()
             db.close()
