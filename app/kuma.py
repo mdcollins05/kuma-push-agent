@@ -89,7 +89,7 @@ def get_push_token_and_apply_tags(
             try:
                 api.add_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
             except Exception as exc:
-                logger.warning("Failed to apply tag %d to monitor %d: %s", tag_id, kuma_monitor_id, exc)
+                logger.warning("Failed to apply tag %d to monitor %d: %s: %s", tag_id, kuma_monitor_id, type(exc).__name__, exc, exc_info=True)
     return push_token
 
 

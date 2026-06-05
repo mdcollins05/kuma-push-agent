@@ -85,7 +85,7 @@ def run_check(monitor_id: int) -> None:
                 monitor.kuma_synced = True
                 db.commit()
             except Exception as exc:
-                logger.warning("Kuma sync failed for monitor %d: %s", monitor_id, exc)
+                logger.warning("Kuma sync failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
                 return
 
         if monitor.push_token:
@@ -100,6 +100,6 @@ def run_check(monitor_id: int) -> None:
                 with httpx.Client(timeout=5.0) as client:
                     client.get(push_url)
             except Exception as exc:
-                logger.warning("Kuma push failed for monitor %d: %s", monitor_id, exc)
+                logger.warning("Kuma push failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
     finally:
         db.close()

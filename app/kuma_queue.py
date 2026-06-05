@@ -73,7 +73,7 @@ def process_kuma_tasks() -> None:
                 task.status = "done"
             except Exception as exc:
                 error_msg = f"{type(exc).__name__}: {exc}"[:1000] or type(exc).__name__
-                logger.warning("Kuma task %d (%s) failed (attempt %d): %r", task.id, task.task_type, task.retry_count + 1, exc)
+                logger.warning("Kuma task %d (%s) failed (attempt %d): %s: %s", task.id, task.task_type, task.retry_count + 1, type(exc).__name__, exc, exc_info=True)
                 if task.retry_count < MAX_RETRIES:
                     task.retry_count += 1
                     task.status = "pending"
@@ -144,7 +144,7 @@ def _run(task, app_cfg) -> None:
                     try:
                         result = api.add_tag(name=tag["name"], color=tag["color"])
                     except Exception as exc:
-                        logger.warning("Failed to create tag %r: %s — skipping", tag.get("name"), exc)
+                        logger.warning("Failed to create tag %r: %s: %s — skipping", tag.get("name"), type(exc).__name__, exc, exc_info=True)
                         continue
                     new_id = result["id"]
                     # Persist the new tag ID before attempting monitor association so it's
@@ -161,15 +161,16 @@ def _run(task, app_cfg) -> None:
                             api.add_monitor_tag(tag_id=new_id, monitor_id=p["kuma_monitor_id"])
                         except Exception as exc:
                             logger.warning(
-                                "Failed to associate tag %d with kuma monitor %d: %s — "
+                                "Failed to associate tag %d with kuma monitor %d: %s: %s — "
                                 "will be applied on next resync",
-                                new_id, p["kuma_monitor_id"], exc,
+                                new_id, p["kuma_monitor_id"], type(exc).__name__, exc,
+                                exc_info=True,
                             )
         finally:
             db.close()
         try:
             refresh_tag_cache()
         except Exception as exc:
-            logger.warning("Tag cache refresh failed after create_tags: %s", exc)
+            logger.warning("Tag cache refresh failed after create_tags: %s: %s", type(exc).__name__, exc, exc_info=True)
     else:
         raise ValueError(f"Unknown task type: {task.task_type}")
