@@ -157,6 +157,18 @@ def test_system_status_reflects_tag_cache_state(client):
             tc._last_error = None
 
 
+def test_system_status_reflects_notification_cache_state(client):
+    import app.notification_cache as nc
+    with nc._lock:
+        nc._last_run = datetime(2025, 6, 1, 8, 0, 0)
+        nc._last_error = "TestError: notify"
+    resp = client.get("/tasks/system-status", headers=HEADERS)
+    assert resp.status_code == 200
+    task = next(t for t in resp.json()["tasks"] if t["id"] == "notification_cache_refresher")
+    assert task["last_run"] == "2025-06-01T08:00:00"
+    assert task["last_error"] == "TestError: notify"
+
+
 def test_system_status_ok_when_no_errors(client):
     resp = client.get("/tasks/system-status", headers=HEADERS)
     assert resp.status_code == 200
