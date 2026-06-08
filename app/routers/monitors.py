@@ -357,7 +357,7 @@ async def monitor_edit_post(
                 fields["interval"] = interval + max(30, interval // 2)
             if notifications_changed:
                 fields["notificationIDList"] = {str(nid): True for nid in notification_ids}
-            enqueue(db, "update", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+            enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
                     monitor.name, monitor_id=monitor_id)
 
     if monitor.kuma_synced and monitor.kuma_monitor_id and tags_changed and kuma_url:
@@ -402,7 +402,7 @@ async def monitor_resync(
         }
         if monitor.notification_ids:
             fields["notificationIDList"] = {str(nid): True for nid in monitor.notification_ids}
-        enqueue(db, "update", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+        enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
                 monitor.name, monitor_id=monitor_id)
 
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
@@ -438,7 +438,7 @@ async def monitor_pause(
     kuma_url, _, __ = _kuma_creds(db)
     if kuma_url and monitor.kuma_monitor_id:
         from ..kuma_queue import enqueue
-        enqueue(db, "pause", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
+        enqueue(db, "pause_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
     pause_check_job(monitor_id)
     monitor.enabled = False
@@ -459,7 +459,7 @@ async def monitor_resume(
     kuma_url, _, __ = _kuma_creds(db)
     if kuma_url and monitor.kuma_monitor_id:
         from ..kuma_queue import enqueue
-        enqueue(db, "resume", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
+        enqueue(db, "resume_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
     resume_check_job(monitor_id)
     monitor.enabled = True
@@ -482,7 +482,7 @@ async def monitor_delete(
         kuma_url, _, __ = _kuma_creds(db)
         if kuma_url:
             from ..kuma_queue import enqueue
-            enqueue(db, "delete", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
+            enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
     remove_check_job(monitor_id)
     db.delete(monitor)

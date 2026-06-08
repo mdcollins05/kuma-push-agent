@@ -28,6 +28,10 @@ async def lifespan(app: FastAPI):
         for ddl in [
             "ALTER TABLE kuma_jobs RENAME TO kuma_tasks",
             "ALTER TABLE kuma_tasks RENAME COLUMN job_type TO task_type",
+            "UPDATE kuma_tasks SET task_type = 'update_monitor' WHERE task_type = 'update'",
+            "UPDATE kuma_tasks SET task_type = 'pause_monitor' WHERE task_type = 'pause'",
+            "UPDATE kuma_tasks SET task_type = 'resume_monitor' WHERE task_type = 'resume'",
+            "UPDATE kuma_tasks SET task_type = 'delete_monitor' WHERE task_type = 'delete'",
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
@@ -72,7 +76,7 @@ async def lifespan(app: FastAPI):
         # Reset failed delete tasks — if the Kuma monitor is already gone, they'll
         # resolve immediately under the updated "does not exist" success logic.
         from .models import KumaTask
-        db.query(KumaTask).filter_by(task_type="delete", status="failed").update(
+        db.query(KumaTask).filter_by(task_type="delete_monitor", status="failed").update(
             {"status": "pending", "retry_count": 0, "next_retry_at": None, "error": None},
             synchronize_session=False,
         )
