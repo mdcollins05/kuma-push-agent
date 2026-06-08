@@ -132,14 +132,23 @@
         <input type="text" class="form-control form-control-sm font-monospace"
           value="{{ s.api_key or '' }}" id="api-key-field" readonly>
         <button class="btn btn-sm btn-outline-secondary" id="copy-key-btn" type="button" onclick="
-          navigator.clipboard.writeText(document.getElementById('api-key-field').value);
           const btn = document.getElementById('copy-key-btn');
-          btn.innerHTML = '<i class=\'bi bi-check2\'></i>';
-          btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
-          setTimeout(() => {
+          const reset = () => {
             btn.innerHTML = '<i class=\'bi bi-clipboard\'></i>';
-            btn.classList.replace('btn-outline-success', 'btn-outline-secondary');
-          }, 2000);
+            btn.classList.remove('btn-outline-success', 'btn-outline-danger');
+            btn.classList.add('btn-outline-secondary');
+          };
+          navigator.clipboard.writeText(document.getElementById('api-key-field').value)
+            .then(() => {
+              btn.innerHTML = '<i class=\'bi bi-check2\'></i>';
+              btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
+              setTimeout(reset, 2000);
+            })
+            .catch(() => {
+              btn.innerHTML = '<i class=\'bi bi-x-lg\'></i>';
+              btn.classList.replace('btn-outline-secondary', 'btn-outline-danger');
+              setTimeout(reset, 2000);
+            });
         ">
           <i class="bi bi-clipboard"></i>
         </button>
@@ -233,5 +242,7 @@ async function testKumaConnection(formId) {
     el.innerHTML = '<span class="text-danger">Request failed</span>';
   }
 }
+
+
 </script>
 {% endblock %}
