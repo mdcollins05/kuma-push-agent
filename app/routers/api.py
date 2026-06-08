@@ -202,9 +202,9 @@ def get_monitor(monitor_id: int, db: Session = Depends(get_db)):
     status_code=201,
     tags=["Monitors"],
     summary="Create a monitor",
-    description="Creates a new health-check monitor and schedules it immediately. Also provisions a Push monitor in Uptime Kuma if configured.",
+    description="Creates a new health-check monitor and schedules it immediately. Uptime Kuma provisioning happens lazily on the first check cycle.",
 )
-async def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
+def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     monitor = Monitor(
         name=payload.name,
         url=payload.url,
@@ -218,23 +218,6 @@ async def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     db.add(monitor)
     db.commit()
     db.refresh(monitor)
-
-    app_cfg = db.get(AppSettings, 1)
-    if app_cfg and app_cfg.configured and app_cfg.kuma_url:
-        try:
-            from ..kuma import create_push_monitor
-            kuma_id, push_token = await run_in_threadpool(
-                create_push_monitor,
-                monitor.name, monitor.interval,
-                app_cfg.kuma_url, app_cfg.kuma_username, app_cfg.kuma_password,
-            )
-            monitor.kuma_monitor_id = kuma_id
-            monitor.push_token = push_token
-            monitor.kuma_synced = True
-            db.commit()
-        except Exception:
-            pass
-
     add_check_job(monitor.id, monitor.interval)
     return _to_response(monitor)
 
@@ -244,7 +227,7 @@ async def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     response_model=MonitorResponse,
     tags=["Monitors"],
     summary="Update a monitor",
-    description="Replaces all fields of an existing monitor. Reschedules the check job if the interval changed.",
+    description="Replaces all fields of an existing monitor. Reschedules the check job if the interval changed. Enqueues Kuma sync jobs for any changed fields.",
     responses=_404,
 )
 def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depends(get_db)):
@@ -252,16 +235,44 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     if not monitor:
         raise HTTPException(status_code=404, detail="Monitor not found")
 
+    old_tag_ids = set(monitor.tag_ids or [])
+    new_tag_ids = set(payload.tag_ids or [])
+    name_changed = monitor.name != payload.name
     interval_changed = monitor.interval != payload.interval
+    notifications_changed = sorted(monitor.notification_ids or []) != sorted(payload.notification_ids or [])
+    tags_changed = old_tag_ids != new_tag_ids
+
     monitor.name = payload.name
     monitor.url = payload.url
     monitor.interval = payload.interval
     monitor.expected_codes = payload.expected_codes
     monitor.keyword = payload.keyword
     monitor.verify_ssl = payload.verify_ssl
-    monitor.tag_ids = payload.tag_ids
+    monitor.tag_ids = list(new_tag_ids)
     monitor.notification_ids = payload.notification_ids
     db.commit()
+
+    app_cfg = db.get(AppSettings, 1)
+    kuma_url = app_cfg.kuma_url if (app_cfg and app_cfg.configured) else None
+
+    if monitor.kuma_synced and monitor.kuma_monitor_id and kuma_url:
+        from ..kuma_queue import enqueue
+        if name_changed or interval_changed or notifications_changed:
+            fields = {}
+            if name_changed:
+                fields["name"] = payload.name
+            if interval_changed:
+                fields["interval"] = payload.interval + max(30, payload.interval // 2)
+            if notifications_changed:
+                fields["notificationIDList"] = {str(nid): True for nid in (payload.notification_ids or [])}
+            enqueue(db, "update", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+                    monitor.name, monitor_id=monitor_id)
+        if tags_changed:
+            enqueue(db, "update_tags", {
+                "kuma_monitor_id": monitor.kuma_monitor_id,
+                "added": list(new_tag_ids - old_tag_ids),
+                "removed": list(old_tag_ids - new_tag_ids),
+            }, monitor.name, monitor_id=monitor_id)
 
     if interval_changed:
         add_check_job(monitor.id, monitor.interval)
@@ -281,6 +292,14 @@ def delete_monitor_api(monitor_id: int, db: Session = Depends(get_db)):
     monitor = db.get(Monitor, monitor_id)
     if not monitor:
         raise HTTPException(status_code=404, detail="Monitor not found")
+
+    if monitor.kuma_synced and monitor.kuma_monitor_id:
+        app_cfg = db.get(AppSettings, 1)
+        if app_cfg and app_cfg.kuma_url:
+            from ..kuma_queue import enqueue
+            enqueue(db, "delete", {"kuma_monitor_id": monitor.kuma_monitor_id},
+                    monitor.name, monitor_id=monitor_id)
+
     remove_check_job(monitor_id)
     db.delete(monitor)
     db.commit()
