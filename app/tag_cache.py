@@ -40,7 +40,7 @@ def load_from_db() -> None:
             _cache = tags
         logger.info("Tag cache loaded from DB: %d entries", len(tags))
     except Exception as exc:
-        logger.warning("Tag cache DB load failed: %s", exc)
+        logger.warning("Tag cache DB load failed: %s: %s", type(exc).__name__, exc, exc_info=True)
     finally:
         db.close()
 
@@ -76,7 +76,7 @@ def refresh(raise_on_error: bool = False) -> None:
             _last_error = None
         logger.debug("Tag cache refreshed from Kuma: %d entries", len(tags))
     except Exception as exc:
-        logger.warning("Tag cache refresh failed: %s", exc)
+        logger.warning("Tag cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=True)
         with _lock:
             _last_run = datetime.utcnow()
             _last_error = f"{type(exc).__name__}: {exc}"
