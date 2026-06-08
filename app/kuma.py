@@ -11,7 +11,7 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
-KUMA_TIMEOUT = 10
+KUMA_TIMEOUT = 5
 
 
 @contextmanager
