@@ -172,5 +172,13 @@ def _run(task, app_cfg) -> None:
             refresh_tag_cache()
         except Exception as exc:
             logger.warning("Tag cache refresh failed after create_tags: %s: %s", type(exc).__name__, exc, exc_info=True)
+    elif task.task_type == "create_tag":
+        from .tag_cache import refresh as refresh_tag_cache
+        with kuma_session(url, user, pw) as api:
+            api.add_tag(name=p["name"], color=p["color"])
+        try:
+            refresh_tag_cache()
+        except Exception as exc:
+            logger.warning("Tag cache refresh failed after create_tag: %s: %s", type(exc).__name__, exc, exc_info=True)
     else:
         raise ValueError(f"Unknown task type: {task.task_type}")

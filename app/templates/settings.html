@@ -131,8 +131,25 @@
       <div class="input-group mb-3">
         <input type="text" class="form-control form-control-sm font-monospace"
           value="{{ s.api_key or '' }}" id="api-key-field" readonly>
-        <button class="btn btn-sm btn-outline-secondary" type="button"
-          onclick="navigator.clipboard.writeText(document.getElementById('api-key-field').value)">
+        <button class="btn btn-sm btn-outline-secondary" id="copy-key-btn" type="button" onclick="
+          const btn = document.getElementById('copy-key-btn');
+          const reset = () => {
+            btn.innerHTML = '<i class=\'bi bi-clipboard\'></i>';
+            btn.classList.remove('btn-outline-success', 'btn-outline-danger');
+            btn.classList.add('btn-outline-secondary');
+          };
+          navigator.clipboard.writeText(document.getElementById('api-key-field').value)
+            .then(() => {
+              btn.innerHTML = '<i class=\'bi bi-check2\'></i>';
+              btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
+              setTimeout(reset, 2000);
+            })
+            .catch(() => {
+              btn.innerHTML = '<i class=\'bi bi-x-lg\'></i>';
+              btn.classList.replace('btn-outline-secondary', 'btn-outline-danger');
+              setTimeout(reset, 2000);
+            });
+        ">
           <i class="bi bi-clipboard"></i>
         </button>
       </div>
@@ -141,6 +158,14 @@
         <i class="bi bi-arrow-clockwise"></i> Regenerate Key
       </button>
       <form id="regen-form" method="post" action="/settings/regenerate-key"></form>
+      <div class="mt-3 d-flex gap-2">
+        <a href="/docs" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary">
+          <i class="bi bi-play-circle"></i> Interactive Docs
+        </a>
+        <a href="/redoc" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-book"></i> API Reference
+        </a>
+      </div>
     </div>
 
     <div class="card p-4 mt-4">
@@ -217,5 +242,7 @@ async function testKumaConnection(formId) {
     el.innerHTML = '<span class="text-danger">Request failed</span>';
   }
 }
+
+
 </script>
 {% endblock %}

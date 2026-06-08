@@ -1,23 +1,15 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Form, Request
-import bcrypt
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db
 from ..models import AppSettings
+from ..passwords import hash_password, verify_password
 from ..templates import templates
 
 router = APIRouter()
-
-
-def _hash(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-
-def _verify(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 @router.get("/setup")
@@ -53,7 +45,7 @@ async def setup_post(
         db.add(app_settings)
 
     app_settings.ui_username = ui_username
-    app_settings.ui_password_hash = _hash(ui_password)
+    app_settings.ui_password_hash = hash_password(ui_password)
     app_settings.api_key = str(uuid.uuid4())
     app_settings.timezone = timezone
     db.commit()
@@ -85,7 +77,7 @@ async def login_post(
         app_settings
         and app_settings.ui_username
         and username == app_settings.ui_username
-        and _verify(password, app_settings.ui_password_hash)
+        and verify_password(password, app_settings.ui_password_hash)
     )
     if not valid:
         return templates.TemplateResponse(

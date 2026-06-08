@@ -105,7 +105,52 @@ async def lifespan(app: FastAPI):
     logger.info("Kuma Push Agent stopped")
 
 
-app = FastAPI(title="Kuma Push Agent", lifespan=lifespan)
+app = FastAPI(
+    title="Kuma Push Agent",
+    description=(
+        "Remote health-check agent for Uptime Kuma v2.\n\n"
+        "Monitors URLs and pushes results via Uptime Kuma Push monitors.\n\n"
+        "## Authentication\n"
+        "All endpoints except `POST /api/v1/setup` require an `X-API-Key` header. "
+        "Find or regenerate your key in **Settings → API Key**."
+    ),
+    version=APP_VERSION,
+    openapi_tags=[
+        {"name": "Setup", "description": "One-time application bootstrap. No authentication required."},
+        {"name": "Settings", "description": "Configure application and Uptime Kuma connection."},
+        {"name": "Tags", "description": "View and create Uptime Kuma tags."},
+        {"name": "Notifications", "description": "View Uptime Kuma notification channels."},
+        {"name": "Monitors", "description": "Create, read, update, and delete health-check monitors."},
+    ],
+    swagger_ui_parameters={"persistAuthorization": True},
+    lifespan=lifespan,
+)
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "ApiKeyHeader": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+    }
+    _no_auth = {"/api/v1/setup"}
+    for path, path_item in schema["paths"].items():
+        if path not in _no_auth:
+            for op in path_item.values():
+                op["security"] = [{"ApiKeyHeader": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
 
 app.add_middleware(
     SessionMiddleware,
@@ -128,9 +173,10 @@ async def login_required_handler(request: Request, exc: LoginRequired):
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-app.include_router(auth.router)
-app.include_router(dashboard.router)
-app.include_router(monitors.router)
-app.include_router(settings_router.router)
+app.include_router(auth.router, include_in_schema=False)
+app.include_router(dashboard.router, include_in_schema=False)
+app.include_router(monitors.router, include_in_schema=False)
+app.include_router(settings_router.router, include_in_schema=False)
+app.include_router(api.public_router)
 app.include_router(api.router)
 app.include_router(tasks_router.router)
