@@ -2,11 +2,10 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, require_api_key
-from ..models import AppSettings, Monitor
+from ..models import AppSettings, KumaTask, Monitor
 from ..monitor_status import monitor_status_dict
 from ..notification_cache import get as get_notifications
 from ..passwords import hash_password
@@ -102,27 +101,23 @@ def list_tags():
 @router.post(
     "/tags",
     response_model=TagResponse,
-    status_code=201,
+    status_code=202,
     tags=["Tags"],
     summary="Create a tag",
-    description="Creates a new tag in Uptime Kuma and refreshes the local tag cache. Requires Kuma to be configured.",
+    description=(
+        "Enqueues creation of a new tag in Uptime Kuma. Returns 202 immediately — "
+        "`id` will be null until the queue processor runs (within ~10 seconds). "
+        "Requires Kuma to be configured."
+    ),
     responses={503: {"description": "Uptime Kuma not configured"}},
 )
-async def create_tag(payload: TagCreate, db: Session = Depends(get_db)):
-    from ..kuma import create_tag as kuma_create_tag
-    from ..tag_cache import refresh as refresh_tags
+def create_tag(payload: TagCreate, db: Session = Depends(get_db)):
     cfg = db.get(AppSettings, 1)
     if not cfg or not cfg.configured:
         raise HTTPException(status_code=503, detail="Uptime Kuma is not configured")
-    result = await run_in_threadpool(
-        kuma_create_tag, payload.name, payload.color,
-        cfg.kuma_url, cfg.kuma_username, cfg.kuma_password,
-    )
-    try:
-        await run_in_threadpool(refresh_tags)
-    except Exception:
-        pass
-    return TagResponse(id=result["id"], name=result["name"], color=result["color"])
+    from ..kuma_queue import enqueue
+    enqueue(db, "create_tag", {"name": payload.name, "color": payload.color})
+    return TagResponse(id=None, name=payload.name, color=payload.color)
 
 
 @router.get(
@@ -158,10 +153,42 @@ def list_monitors(db: Session = Depends(get_db)):
     description="Returns live status fields for all monitors — last check time, last status, response time, error, and Kuma sync state.",
 )
 def list_monitor_statuses(db: Session = Depends(get_db)):
+    from sqlalchemy import func
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).order_by(Monitor.name).all()
-    return [monitor_status_dict(m, db=db, tz=tz) for m in monitors]
+
+    task_counts: dict[int, dict[str, int]] = {}
+    for monitor_id, status, count in (
+        db.query(KumaTask.monitor_id, KumaTask.status, func.count(KumaTask.id))
+        .filter(KumaTask.monitor_id.isnot(None), KumaTask.status.in_(["pending", "failed"]))
+        .group_by(KumaTask.monitor_id, KumaTask.status)
+        .all()
+    ):
+        task_counts.setdefault(monitor_id, {})[status] = count
+
+    pending_create_tag_ids = {
+        monitor_id for (monitor_id,) in (
+            db.query(KumaTask.monitor_id)
+            .filter(
+                KumaTask.monitor_id.isnot(None),
+                KumaTask.task_type == "create_tags",
+                KumaTask.status.in_(["pending", "failed"]),
+            )
+            .distinct()
+            .all()
+        )
+    }
+
+    result = []
+    for m in monitors:
+        d = monitor_status_dict(m, tz=tz)
+        counts = task_counts.get(m.id, {})
+        d["pending_jobs"] = counts.get("pending", 0)
+        d["failed_jobs"] = counts.get("failed", 0)
+        d["pending_create_tags"] = m.id in pending_create_tag_ids
+        result.append(d)
+    return result
 
 
 @router.get(

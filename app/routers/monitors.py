@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .. import kuma as kuma_module
 from ..dependencies import get_db, require_auth
-from ..models import AppSettings, KumaJob, Monitor
+from ..models import AppSettings, KumaTask, Monitor
 from ..monitor_status import monitor_status_dict
 from ..scheduler import add_check_job, pause_check_job, remove_check_job, resume_check_job
 from ..templates import templates
@@ -43,6 +43,8 @@ def _fetch_tags() -> list:
 
 
 
+
+
 @router.post("/tags/refresh")
 async def tags_refresh(
     user: str = Depends(require_auth),
@@ -50,6 +52,18 @@ async def tags_refresh(
     from ..tag_cache import refresh as refresh_tag_cache
     try:
         await run_in_threadpool(refresh_tag_cache, True)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/notifications/refresh")
+async def notifications_refresh(
+    user: str = Depends(require_auth),
+):
+    from ..notification_cache import refresh as refresh_notification_cache
+    try:
+        await run_in_threadpool(refresh_notification_cache, True)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
     return JSONResponse({"ok": True})
@@ -65,22 +79,22 @@ async def monitor_statuses(
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).all()
 
-    job_counts: dict[int, dict[str, int]] = {}
+    task_counts: dict[int, dict[str, int]] = {}
     for monitor_id, status, count in (
-        db.query(KumaJob.monitor_id, KumaJob.status, func.count(KumaJob.id))
-        .filter(KumaJob.monitor_id.isnot(None), KumaJob.status.in_(["pending", "failed"]))
-        .group_by(KumaJob.monitor_id, KumaJob.status)
+        db.query(KumaTask.monitor_id, KumaTask.status, func.count(KumaTask.id))
+        .filter(KumaTask.monitor_id.isnot(None), KumaTask.status.in_(["pending", "failed"]))
+        .group_by(KumaTask.monitor_id, KumaTask.status)
         .all()
     ):
-        job_counts.setdefault(monitor_id, {})[status] = count
+        task_counts.setdefault(monitor_id, {})[status] = count
 
     pending_create_tag_ids = {
         monitor_id for (monitor_id,) in (
-            db.query(KumaJob.monitor_id)
+            db.query(KumaTask.monitor_id)
             .filter(
-                KumaJob.monitor_id.isnot(None),
-                KumaJob.job_type == "create_tags",
-                KumaJob.status.in_(["pending", "failed"]),
+                KumaTask.monitor_id.isnot(None),
+                KumaTask.task_type == "create_tags",
+                KumaTask.status.in_(["pending", "failed"]),
             )
             .distinct()
             .all()
@@ -90,9 +104,9 @@ async def monitor_statuses(
     result = []
     for m in monitors:
         d = monitor_status_dict(m, tz=tz)
-        counts = job_counts.get(m.id, {})
-        d["pending_jobs"] = counts.get("pending", 0)
-        d["failed_jobs"] = counts.get("failed", 0)
+        counts = task_counts.get(m.id, {})
+        d["pending_tasks"] = counts.get("pending", 0)
+        d["failed_tasks"] = counts.get("failed", 0)
         d["pending_create_tags"] = m.id in pending_create_tag_ids
         result.append(d)
     return JSONResponse(result)
@@ -109,7 +123,10 @@ async def monitor_status(
         return JSONResponse({"error": "not found"}, status_code=404)
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
-    return JSONResponse(monitor_status_dict(monitor, db, tz=tz))
+    d = monitor_status_dict(monitor, db, tz=tz)
+    d["pending_tasks"] = d.pop("pending_jobs")
+    d["failed_tasks"] = d.pop("failed_jobs")
+    return JSONResponse(d)
 
 
 @router.get("/new")
@@ -205,22 +222,22 @@ async def monitor_edit_get(
     kuma_url, kuma_user, kuma_pass = _kuma_creds(db)
     notifications = _fetch_notifications()
     available_tags = _fetch_tags()
-    job_counts = dict(
-        db.query(KumaJob.status, __import__("sqlalchemy").func.count(KumaJob.id))
-        .filter(KumaJob.monitor_id == monitor_id, KumaJob.status.in_(["pending", "failed"]))
-        .group_by(KumaJob.status)
+    task_counts = dict(
+        db.query(KumaTask.status, __import__("sqlalchemy").func.count(KumaTask.id))
+        .filter(KumaTask.monitor_id == monitor_id, KumaTask.status.in_(["pending", "failed"]))
+        .group_by(KumaTask.status)
         .all()
     )
     pending_new_tags = []
-    for job in (
-        db.query(KumaJob)
-        .filter(KumaJob.monitor_id == monitor_id, KumaJob.job_type == "create_tags",
-                KumaJob.status.in_(["pending", "failed"]))
+    for task in (
+        db.query(KumaTask)
+        .filter(KumaTask.monitor_id == monitor_id, KumaTask.task_type == "create_tags",
+                KumaTask.status.in_(["pending", "failed"]))
         .all()
     ):
-        for t in (job.payload or {}).get("tags", []):
+        for t in (task.payload or {}).get("tags", []):
             pending_new_tags.append({"name": t["name"], "color": t["color"],
-                                     "failed": job.status == "failed"})
+                                     "failed": task.status == "failed"})
 
     selected_tag_ids = monitor.tag_ids or []
 
@@ -230,9 +247,9 @@ async def monitor_edit_get(
         "notifications": notifications, "kuma_configured": bool(kuma_url),
         "available_tags": available_tags,
         "selected_tag_ids": selected_tag_ids,
-"pending_new_tags": pending_new_tags,
-        "pending_jobs": job_counts.get("pending", 0),
-        "failed_jobs": job_counts.get("failed", 0),
+        "pending_new_tags": pending_new_tags,
+        "pending_tasks": task_counts.get("pending", 0),
+        "failed_tasks": task_counts.get("failed", 0),
         "timezone": (cfg.timezone or "UTC") if cfg else "UTC",
     })
 
@@ -269,7 +286,7 @@ async def monitor_edit_post(
             {"monitor": monitor, "user": user, "error": msg,
              "notifications": _fetch_notifications(), "kuma_configured": bool(kuma_url),
              "available_tags": available_tags, "selected_tag_ids": tag_ids,
-             "pending_jobs": 0, "failed_jobs": 0,
+             "pending_tasks": 0, "failed_tasks": 0,
              "timezone": (cfg.timezone or "UTC") if cfg else "UTC"},
             status_code=status,
         )
@@ -347,8 +364,8 @@ async def monitor_resync(
 
     kuma_url, _, __ = _kuma_creds(db)
     if kuma_url:
-        from ..kuma_queue import cancel_monitor_jobs, enqueue
-        cancel_monitor_jobs(db, monitor_id)
+        from ..kuma_queue import cancel_monitor_tasks, enqueue
+        cancel_monitor_tasks(db, monitor_id)
         fields = {
             "name": monitor.name,
             "interval": monitor.interval + max(30, monitor.interval // 2),

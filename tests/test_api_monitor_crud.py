@@ -105,9 +105,11 @@ def test_create_persists_tag_and_notification_ids(client):
     }, headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
-    assert body["tag_ids"] == [1, 2]
-    assert body["notification_ids"] == [10]
-    client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+    try:
+        assert body["tag_ids"] == [1, 2]
+        assert body["notification_ids"] == [10]
+    finally:
+        client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
 
 
 # ── Get ───────────────────────────────────────────────────────────────────────
@@ -142,19 +144,21 @@ def test_update_persists_tag_and_notification_ids(client):
         "name": "Update Tag Test",
         "url": "https://updatetag.example.com",
     }, headers=HEADERS)
+    assert create.status_code == 201
     mid = create.json()["id"]
-
-    resp = client.put(f"/api/v1/monitors/{mid}", json={
-        "name": "Update Tag Test",
-        "url": "https://updatetag.example.com",
-        "tag_ids": [5],
-        "notification_ids": [20, 21],
-    }, headers=HEADERS)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["tag_ids"] == [5]
-    assert body["notification_ids"] == [20, 21]
-    client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
+    try:
+        resp = client.put(f"/api/v1/monitors/{mid}", json={
+            "name": "Update Tag Test",
+            "url": "https://updatetag.example.com",
+            "tag_ids": [5],
+            "notification_ids": [20, 21],
+        }, headers=HEADERS)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tag_ids"] == [5]
+        assert body["notification_ids"] == [20, 21]
+    finally:
+        client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
 
 
 def test_update_not_found(client):

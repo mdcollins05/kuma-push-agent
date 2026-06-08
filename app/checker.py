@@ -61,7 +61,6 @@ def run_check(monitor_id: int) -> None:
         if not monitor.kuma_synced:
             logger.info("run_check kuma sync: monitor_id=%d kuma_monitor_id=%s", monitor_id, monitor.kuma_monitor_id)
             try:
-                from .kuma import get_push_token
                 if not monitor.kuma_monitor_id:
                     kuma_id = create_push_monitor(
                         name=monitor.name,
@@ -74,8 +73,10 @@ def run_check(monitor_id: int) -> None:
                     monitor.kuma_monitor_id = kuma_id
                     db.commit()  # persist ID before token fetch — prevents duplicate creation on retry
 
-                push_token = get_push_token(
+                from .kuma import get_push_token_and_apply_tags
+                push_token = get_push_token_and_apply_tags(
                     kuma_monitor_id=monitor.kuma_monitor_id,
+                    tag_ids=monitor.tag_ids or [],
                     kuma_url=app_cfg.kuma_url,
                     kuma_username=app_cfg.kuma_username,
                     kuma_password=app_cfg.kuma_password,
@@ -83,21 +84,8 @@ def run_check(monitor_id: int) -> None:
                 monitor.push_token = push_token
                 monitor.kuma_synced = True
                 db.commit()
-
-                from .kuma import add_monitor_tag
-                for tag_id in (monitor.tag_ids or []):
-                    try:
-                        add_monitor_tag(
-                            kuma_monitor_id=monitor.kuma_monitor_id,
-                            tag_id=tag_id,
-                            kuma_url=app_cfg.kuma_url,
-                            kuma_username=app_cfg.kuma_username,
-                            kuma_password=app_cfg.kuma_password,
-                        )
-                    except Exception as tag_exc:
-                        logger.warning("Failed to apply tag %d to monitor %d: %s", tag_id, monitor_id, tag_exc)
             except Exception as exc:
-                logger.warning("Kuma sync failed for monitor %d: %s", monitor_id, exc)
+                logger.warning("Kuma sync failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
                 return
 
         if monitor.push_token:
@@ -112,6 +100,6 @@ def run_check(monitor_id: int) -> None:
                 with httpx.Client(timeout=5.0) as client:
                     client.get(push_url)
             except Exception as exc:
-                logger.warning("Kuma push failed for monitor %d: %s", monitor_id, exc)
+                logger.warning("Kuma push failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
     finally:
         db.close()

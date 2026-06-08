@@ -9,7 +9,7 @@ class NotificationResponse(BaseModel):
 
 
 class TagResponse(BaseModel):
-    id: int = Field(..., description="Uptime Kuma tag ID")
+    id: Optional[int] = Field(None, description="Uptime Kuma tag ID — null when creation is queued and not yet processed")
     name: str = Field(..., description="Tag name")
     color: str = Field(..., description="Tag color as a hex string", examples=["#3396FF"])
 

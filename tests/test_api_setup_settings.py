@@ -14,7 +14,7 @@ def test_setup_already_configured_returns_409(client):
 def test_setup_creates_user_on_fresh_db(client):
     db = TestingSessionLocal()
     s = db.get(AppSettings, 1)
-    saved = (s.ui_username, s.ui_password_hash, s.api_key)
+    saved = (s.ui_username, s.ui_password_hash, s.api_key, s.timezone)
     s.ui_username = None
     s.ui_password_hash = None
     s.api_key = None
@@ -29,7 +29,7 @@ def test_setup_creates_user_on_fresh_db(client):
         assert len(body["api_key"]) > 0
     finally:
         s = db.get(AppSettings, 1)
-        s.ui_username, s.ui_password_hash, s.api_key = saved
+        s.ui_username, s.ui_password_hash, s.api_key, s.timezone = saved
         db.commit()
         db.close()
 
@@ -50,28 +50,32 @@ def _reset_kuma_settings():
 
 
 def test_configure_kuma_saves_settings(client):
-    resp = client.put("/api/v1/settings/kuma", json={
-        "kuma_url": "http://kuma:3001",
-        "kuma_username": "admin",
-        "kuma_password": "secret",
-    }, headers=HEADERS)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["kuma_url"] == "http://kuma:3001"
-    assert body["kuma_username"] == "admin"
-    assert body["configured"] is True
-    _reset_kuma_settings()
+    try:
+        resp = client.put("/api/v1/settings/kuma", json={
+            "kuma_url": "http://kuma:3001",
+            "kuma_username": "admin",
+            "kuma_password": "secret",
+        }, headers=HEADERS)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["kuma_url"] == "http://kuma:3001"
+        assert body["kuma_username"] == "admin"
+        assert body["configured"] is True
+    finally:
+        _reset_kuma_settings()
 
 
 def test_configure_kuma_strips_trailing_slash(client):
-    resp = client.put("/api/v1/settings/kuma", json={
-        "kuma_url": "http://kuma:3001/",
-        "kuma_username": "admin",
-        "kuma_password": "secret",
-    }, headers=HEADERS)
-    assert resp.status_code == 200
-    assert resp.json()["kuma_url"] == "http://kuma:3001"
-    _reset_kuma_settings()
+    try:
+        resp = client.put("/api/v1/settings/kuma", json={
+            "kuma_url": "http://kuma:3001/",
+            "kuma_username": "admin",
+            "kuma_password": "secret",
+        }, headers=HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["kuma_url"] == "http://kuma:3001"
+    finally:
+        _reset_kuma_settings()
 
 
 def test_configure_kuma_blank_url_returns_422(client):

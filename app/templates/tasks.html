@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Tasks — Kuma Push Agent{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h5 class="fw-bold mb-0">Tasks</h5>
+  <a href="/settings" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> Settings
+  </a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold small">Recurring Tasks</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle" id="system-tasks-table">
+      <thead>
+        <tr>
+          <th class="ps-3">Task</th>
+          <th style="width:100px">Interval</th>
+          <th style="width:170px">Last Run</th>
+          <th style="width:170px">Next Run</th>
+          <th style="width:90px">Status</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="system-tasks-body">
+        <tr><td colspan="6" class="text-center text-muted py-3 small">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% set status_counts = {"pending": 0, "failed": 0, "done": 0, "cancelled": 0} %}
+{% for t in tasks %}
+  {% if t.status in status_counts %}
+    {% set _ = status_counts.update({t.status: status_counts[t.status] + 1}) %}
+  {% endif %}
+{% endfor %}
+
+<h6 class="fw-semibold mt-2 mb-3">Task History</h6>
+<div class="d-flex gap-2 mb-3 flex-wrap" id="filter-tabs">
+  <button class="btn btn-sm btn-primary active" data-filter="all">
+    All <span class="badge bg-white text-dark ms-1">{{ tasks|length }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-warning" data-filter="pending">
+    Pending <span class="badge bg-warning text-dark ms-1">{{ status_counts.pending }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-danger" data-filter="failed">
+    Failed <span class="badge bg-danger ms-1">{{ status_counts.failed }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-success" data-filter="done">
+    Done <span class="badge bg-success ms-1">{{ status_counts.done }}</span>
+  </button>
+  <button class="btn btn-sm btn-outline-secondary" data-filter="cancelled">
+    Cancelled <span class="badge bg-secondary ms-1">{{ status_counts.cancelled }}</span>
+  </button>
+  <span class="ms-auto small text-muted align-self-center" id="last-updated"></span>
+</div>
+
+<div class="card p-0">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" id="tasks-table">
+      <thead>
+        <tr>
+          <th class="ps-3" style="width:160px">Time</th>
+          <th style="width:120px">Type</th>
+          <th>Monitor</th>
+          <th style="width:110px">Status</th>
+          <th style="width:70px" class="text-center">Retries</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="tasks-body">
+        {% for t in tasks %}
+        <tr data-status="{{ t.status }}">
+          <td class="ps-3 text-muted small text-nowrap">{{ t.created_at | local_dt(tz) }}</td>
+          <td><code class="small">{{ t.task_type }}</code></td>
+          <td class="small">
+            {% if t.monitor_id %}
+              <a href="/monitors/{{ t.monitor_id }}/edit" class="text-decoration-none">{{ t.monitor_name or t.monitor_id }}</a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if t.status == "pending" %}
+              <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>
+            {% elif t.status == "failed" %}
+              <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
+            {% elif t.status == "done" %}
+              <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Done</span>
+            {% elif t.status == "cancelled" %}
+              <span class="badge bg-secondary"><i class="bi bi-slash-circle me-1"></i>Cancelled</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ t.status }}</span>
+            {% endif %}
+          </td>
+          <td class="text-center small">{{ t.retry_count or 0 }}</td>
+          <td class="small text-danger">
+            {% if t.error %}<span title="{{ t.error }}">{{ t.error[:120] }}{% if t.error|length > 120 %}…{% endif %}</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr id="empty-row">
+          <td colspan="6" class="text-center text-muted py-4">No tasks found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const TZ = {{ tz | tojson }};
+let activeFilter = 'all';
+
+document.getElementById('filter-tabs').addEventListener('click', function(e) {
+  const btn = e.target.closest('button[data-filter]');
+  if (!btn) return;
+  activeFilter = btn.dataset.filter;
+  document.querySelectorAll('#filter-tabs button').forEach(b => {
+    b.classList.toggle('active', b === btn);
+    // Swap solid/outline
+    const base = b.dataset.filter === 'all' ? 'btn-primary' :
+                 b.dataset.filter === 'pending' ? 'btn-warning' :
+                 b.dataset.filter === 'failed' ? 'btn-danger' :
+                 b.dataset.filter === 'done' ? 'btn-success' : 'btn-secondary';
+    const outline = 'btn-outline-' + (base.replace('btn-', ''));
+    if (b === btn) { b.classList.add(base); b.classList.remove(outline); }
+    else           { b.classList.remove(base); b.classList.add(outline); }
+  });
+  applyFilter();
+});
+
+function applyFilter() {
+  document.querySelectorAll('#tasks-body tr[data-status]').forEach(row => {
+    row.style.display = (activeFilter === 'all' || row.dataset.status === activeFilter) ? '' : 'none';
+  });
+}
+
+const STATUS_BADGE = {
+  pending:   '<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>',
+  failed:    '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>',
+  done:      '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Done</span>',
+  cancelled: '<span class="badge bg-secondary"><i class="bi bi-slash-circle me-1"></i>Cancelled</span>',
+};
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '—';
+  try {
+    const s = /Z|[+-]\d{2}:\d{2}$/.test(isoStr) ? isoStr : isoStr + 'Z';
+    return new Date(s).toLocaleString('sv-SE', {timeZone: TZ}).replace('T', ' ');
+  } catch { return isoStr; }
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/tasks/data');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    // Update filter badge counts
+    const counts = {all: data.tasks.length, pending: 0, failed: 0, done: 0, cancelled: 0};
+    data.tasks.forEach(t => { if (t.status in counts) counts[t.status]++; });
+    document.querySelectorAll('#filter-tabs button[data-filter]').forEach(btn => {
+      const f = btn.dataset.filter;
+      const badge = btn.querySelector('.badge');
+      if (badge) badge.textContent = counts[f] ?? 0;
+    });
+
+    const tbody = document.getElementById('tasks-body');
+    if (data.tasks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No tasks found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.tasks.map(t => {
+      const badge = STATUS_BADGE[t.status] || `<span class="badge bg-secondary">${t.status}</span>`;
+      const monitorCell = t.monitor_id
+        ? `<a href="/monitors/${t.monitor_id}/edit" class="text-decoration-none">${escHtml(t.monitor_name || String(t.monitor_id))}</a>`
+        : '<span class="text-muted">—</span>';
+      const errText = t.error ? escHtml(t.error.length > 120 ? t.error.slice(0, 120) + '…' : t.error) : '';
+      const errCell = t.error ? `<span title="${escHtml(t.error)}">${errText}</span>` : '';
+      return `<tr data-status="${t.status}">
+        <td class="ps-3 text-muted small text-nowrap">${fmtTime(t.created_at)}</td>
+        <td><code class="small">${escHtml(t.task_type)}</code></td>
+        <td class="small">${monitorCell}</td>
+        <td>${badge}</td>
+        <td class="text-center small">${t.retry_count || 0}</td>
+        <td class="small text-danger">${errCell}</td>
+      </tr>`;
+    }).join('');
+
+    applyFilter();
+
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('last-updated').textContent = `Updated ${now}`;
+  } catch (e) { /* silent */ }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function refreshSystemTasks() {
+  try {
+    const resp = await fetch('/tasks/system-status');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const tbody = document.getElementById('system-tasks-body');
+    tbody.innerHTML = data.tasks.map(t => {
+      const ok = !t.last_error;
+      const badge = ok
+        ? '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>OK</span>'
+        : '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Error</span>';
+      const lastRun = t.last_run ? fmtTime(t.last_run) : '<span class="text-muted">—</span>';
+      const nextRun = t.next_run ? fmtTime(t.next_run) : '<span class="text-muted">—</span>';
+      const errText = t.last_error
+        ? `<span class="text-danger" title="${escHtml(t.last_error)}">${escHtml(t.last_error.length > 120 ? t.last_error.slice(0, 120) + '…' : t.last_error)}</span>`
+        : '';
+      return `<tr>
+        <td class="ps-3 small">${escHtml(t.label)}</td>
+        <td class="small text-muted">${escHtml(t.interval)}</td>
+        <td class="small text-muted text-nowrap">${lastRun}</td>
+        <td class="small text-muted text-nowrap">${nextRun}</td>
+        <td>${badge}</td>
+        <td class="small">${errText}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* silent */ }
+}
+
+refresh();
+refreshSystemTasks();
+setInterval(refresh, 5000);
+setInterval(refreshSystemTasks, 5000);
+</script>
+{% endblock %}

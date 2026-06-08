@@ -33,11 +33,11 @@ class Monitor(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class KumaJob(Base):
-    __tablename__ = "kuma_jobs"
+class KumaTask(Base):
+    __tablename__ = "kuma_tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    job_type = Column(String, nullable=False)        # update | pause | resume | delete
+    task_type = Column(String, nullable=False)       # update | pause | resume | delete
     monitor_id = Column(Integer, nullable=True)      # for querying per-monitor
     monitor_name = Column(String, nullable=True)     # cached for display
     payload = Column(JSON, nullable=False, default=dict)
@@ -54,6 +54,13 @@ class KumaTag(Base):
     id = Column(Integer, primary_key=True)  # Kuma's tag ID, not autoincrement
     name = Column(String, nullable=False)
     color = Column(String, nullable=False)
+
+
+class KumaNotification(Base):
+    __tablename__ = "kuma_notifications"
+
+    id = Column(Integer, primary_key=True)  # Kuma's notification ID, not autoincrement
+    name = Column(String, nullable=False)
 
 
 class AppSettings(Base):
