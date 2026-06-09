@@ -26,9 +26,8 @@ class TestIsNewer:
         assert _is_newer("0.1.9", "0.2.0") is False
 
     def test_stable_vs_prerelease(self):
-        # stable release should be considered newer than pre-release of same base
         from app.update_cache import _is_newer
-        assert _is_newer("0.2.0", "0.2.0-dev.3") is False  # same base, stable wins on tuple
+        assert _is_newer("0.2.0", "0.2.0-dev.3") is True
 
     def test_invalid_version_does_not_crash(self):
         from app.update_cache import _is_newer

@@ -90,10 +90,19 @@ def _persist_last_check(dt: datetime) -> None:
 
 
 def _is_newer(latest: str, current: str) -> bool:
-    def _parse(v: str) -> tuple:
-        base = v.split("-")[0]
+    def _parse(v: str) -> tuple[tuple, str | None]:
+        parts = v.split("-", 1)
         try:
-            return tuple(int(x) for x in base.split("."))
+            base = tuple(int(x) for x in parts[0].split("."))
         except ValueError:
-            return (0,)
-    return _parse(latest) > _parse(current)
+            base = (0,)
+        pre = parts[1] if len(parts) > 1 else None
+        return base, pre
+
+    latest_base, latest_pre = _parse(latest)
+    current_base, current_pre = _parse(current)
+
+    if latest_base != current_base:
+        return latest_base > current_base
+    # Same base version: stable release is newer than any pre-release
+    return latest_pre is None and current_pre is not None
