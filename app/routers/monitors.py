@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .. import kuma as kuma_module
 from ..dependencies import get_db, require_auth
 from ..models import AppSettings, KumaTask, Monitor
+from ..monitor_status import monitor_status_dict
 from ..scheduler import add_check_job, pause_check_job, remove_check_job, resume_check_job
 from ..templates import templates
 
@@ -41,41 +42,7 @@ def _fetch_tags() -> list:
     return get()
 
 
-def _monitor_status_dict(m: Monitor, db: Session = None, tz: str = "UTC") -> dict:
-    pending_tasks = 0
-    failed_tasks = 0
-    pending_create_tags = False
-    if db is not None:
-        from sqlalchemy import func
-        rows = (
-            db.query(KumaTask.status, func.count(KumaTask.id))
-            .filter(KumaTask.monitor_id == m.id, KumaTask.status.in_(["pending", "failed"]))
-            .group_by(KumaTask.status)
-            .all()
-        )
-        counts = dict(rows)
-        pending_tasks = counts.get("pending", 0)
-        failed_tasks = counts.get("failed", 0)
-        pending_create_tags = db.query(KumaTask).filter(
-            KumaTask.monitor_id == m.id,
-            KumaTask.task_type == "create_tags",
-            KumaTask.status.in_(["pending", "failed"]),
-        ).first() is not None
 
-    from ..templates import _local_dt
-    return {
-        "id": m.id,
-        "enabled": m.enabled,
-        "last_status": m.last_status,
-        "last_check_time": _local_dt(m.last_check_time, tz),
-        "last_response_ms": m.last_response_ms,
-        "last_error": m.last_error,
-        "kuma_synced": m.kuma_synced,
-        "kuma_monitor_id": m.kuma_monitor_id,
-        "pending_tasks": pending_tasks,
-        "failed_tasks": failed_tasks,
-        "pending_create_tags": pending_create_tags,
-    }
 
 
 @router.post("/tags/refresh")
@@ -136,7 +103,7 @@ async def monitor_statuses(
 
     result = []
     for m in monitors:
-        d = _monitor_status_dict(m, tz=tz)
+        d = monitor_status_dict(m, tz=tz)
         counts = task_counts.get(m.id, {})
         d["pending_tasks"] = counts.get("pending", 0)
         d["failed_tasks"] = counts.get("failed", 0)
@@ -156,7 +123,10 @@ async def monitor_status(
         return JSONResponse({"error": "not found"}, status_code=404)
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
-    return JSONResponse(_monitor_status_dict(monitor, db, tz=tz))
+    d = monitor_status_dict(monitor, db, tz=tz)
+    d["pending_tasks"] = d.pop("pending_jobs")
+    d["failed_tasks"] = d.pop("failed_jobs")
+    return JSONResponse(d)
 
 
 @router.get("/new")

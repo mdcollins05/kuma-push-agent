@@ -46,7 +46,10 @@
       {{ pending_tasks }} sync task{{ 's' if pending_tasks != 1 else '' }} pending — syncing with Uptime Kuma…
     {% endif %}
   </span>
-  <form method="post" action="/monitors/{{ monitor.id }}/resync" class="ms-auto">
+  <a href="/tasks" class="btn btn-sm btn-outline-secondary ms-auto">
+    <i class="bi bi-list-check"></i> View Tasks
+  </a>
+  <form method="post" action="/monitors/{{ monitor.id }}/resync">
     <button type="submit" class="btn btn-sm {% if failed_tasks > 0 %}btn-danger{% else %}btn-warning{% endif %}" id="sync-resync-btn">
       <i class="bi bi-arrow-repeat"></i> Re-sync Now
     </button>
