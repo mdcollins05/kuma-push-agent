@@ -121,6 +121,10 @@ git push origin v1.2.3
 
 This triggers the release workflow: tests run, then a multi-arch Docker image is built and pushed to `ghcr.io/mdcollins05/kuma-push-agent` with tags `1.2.3`, `1.2`, `1`, and `latest`.
 
+### Pre-release tags
+
+Use the `vX.Y.Z-dev.N` format for pre-release tags (e.g. `v0.3.0-dev.1`). Do **not** use `-beta.N` — that was used historically but `dev` is the canonical format going forward. The `latest` Docker tag is suppressed for any tag containing `-`.
+
 ## Testing
 
 Tests run in a separate Docker image with dev dependencies (pytest) installed. No host Python install or running Kuma server needed.
