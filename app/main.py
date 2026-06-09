@@ -11,7 +11,7 @@ from .database import engine
 from .dependencies import LoginRequired, SetupRequired
 from .models import AppSettings, Base
 from .routers import api, auth, dashboard, monitors, settings as settings_router, tasks as tasks_router
-from .scheduler import scheduler, add_check_job, start_kuma_task_processor, start_notification_cache_refresher, start_tag_cache_refresher
+from .scheduler import scheduler, add_check_job, start_kuma_task_processor, start_notification_cache_refresher, start_tag_cache_refresher, start_update_checker
 from .seed import seed_from_yaml
 
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE kuma_tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE kuma_tasks ADD COLUMN next_retry_at DATETIME",
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
+            "ALTER TABLE app_settings ADD COLUMN last_update_check DATETIME",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
             """CREATE TABLE IF NOT EXISTS kuma_tags (
                 id INTEGER PRIMARY KEY,
@@ -116,6 +117,7 @@ async def lifespan(app: FastAPI):
     start_kuma_task_processor()
     start_notification_cache_refresher()
     start_tag_cache_refresher()
+    start_update_checker()
     scheduler.start()
     logger.info("Kuma Push Agent v%s started — %d monitor tasks scheduled", APP_VERSION, len(scheduler.get_jobs()))
 

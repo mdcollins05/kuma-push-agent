@@ -94,3 +94,22 @@ def start_tag_cache_refresher() -> None:
         id="tag_cache_initial",
         run_date=datetime.utcnow() + timedelta(seconds=5),
     )
+
+
+def start_update_checker() -> None:
+    from datetime import datetime, timedelta
+    from .update_cache import refresh, next_run_time
+
+    scheduler.add_job(
+        refresh,
+        "interval",
+        hours=6,
+        id="update_checker",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        refresh,
+        "date",
+        id="update_checker_initial",
+        run_date=next_run_time(),
+    )

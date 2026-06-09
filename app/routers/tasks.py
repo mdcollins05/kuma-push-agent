@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_db, require_auth
 from ..models import AppSettings, KumaTask
 from ..templates import templates
-from .. import tag_cache, notification_cache, kuma_queue
+from .. import tag_cache, notification_cache, kuma_queue, update_cache
 from ..scheduler import scheduler
 
 router = APIRouter(prefix="/tasks")
@@ -90,6 +90,13 @@ async def system_status(user: str = Depends(require_auth)):
                 "interval": "every 5m",
                 **notification_cache.status(),
                 "next_run": next_run("notification_cache_refresher"),
+            },
+            {
+                "id": "update_checker",
+                "label": "Update checker",
+                "interval": "every 6h",
+                **update_cache.status(),
+                "next_run": next_run("update_checker"),
             },
         ]
     })
