@@ -96,6 +96,26 @@ def start_tag_cache_refresher() -> None:
     )
 
 
+def start_group_cache_refresher() -> None:
+    from datetime import datetime, timedelta
+    from .group_cache import refresh
+
+    scheduler.add_job(
+        refresh,
+        "interval",
+        minutes=5,
+        id="group_cache_refresher",
+        replace_existing=True,
+    )
+    # Stagger 10 s after notification cache (tag is at +5 s) so concurrent Socket.IO logins don't race.
+    scheduler.add_job(
+        refresh,
+        "date",
+        id="group_cache_initial",
+        run_date=datetime.utcnow() + timedelta(seconds=10),
+    )
+
+
 def start_update_checker() -> None:
     from datetime import datetime, timedelta
     from .update_cache import refresh, next_run_time

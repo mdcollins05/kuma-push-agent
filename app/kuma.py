@@ -29,6 +29,7 @@ def create_push_monitor(
     kuma_username: str,
     kuma_password: str,
     notification_ids: list[int] | None = None,
+    parent: int | None = None,
 ) -> int:
     """Create a Push monitor in Kuma. Blocking — call via run_in_threadpool.
     Returns kuma_monitor_id only. Call get_push_token_and_apply_tags() to retrieve token and apply tags.
@@ -38,6 +39,8 @@ def create_push_monitor(
         kwargs = {}
         if notification_ids:
             kwargs["notificationIDList"] = {str(nid): True for nid in notification_ids}
+        if parent is not None:
+            kwargs["parent"] = parent
         # Add a grace buffer so timing drift doesn't trigger false pending/down alerts.
         # Kuma interval = check interval + max(30s, 50% of check interval).
         kuma_interval = interval + max(30, interval // 2)
@@ -162,6 +165,22 @@ def get_tags(
     with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
         api.login(kuma_username, kuma_password)
         return api.get_tags()
+
+
+def get_groups(
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> list[dict]:
+    """Fetch all group-type monitors from Kuma. Blocking."""
+    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
+        api.login(kuma_username, kuma_password)
+        monitors = api.get_monitors()
+    return [
+        {"kuma_id": m["id"], "name": m["name"]}
+        for m in monitors
+        if m.get("type") == "group"
+    ]
 
 
 def create_tag(

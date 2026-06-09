@@ -79,6 +79,7 @@ def run_check(monitor_id: int) -> None:
                         kuma_username=app_cfg.kuma_username,
                         kuma_password=app_cfg.kuma_password,
                         notification_ids=monitor.notification_ids or None,
+                        parent=monitor.kuma_group_id,
                     )
                     monitor.kuma_monitor_id = kuma_id
                     db.commit()  # persist ID before token fetch — prevents duplicate creation on retry

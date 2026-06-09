@@ -42,6 +42,11 @@ def _fetch_tags() -> list:
     return get()
 
 
+def _fetch_groups() -> list:
+    from ..group_cache import get
+    return get()
+
+
 
 
 
@@ -138,9 +143,11 @@ async def monitor_new_get(
     kuma_url, _, __ = _kuma_creds(db)
     notifications = _fetch_notifications()
     available_tags = _fetch_tags()
+    groups = _fetch_groups()
     return templates.TemplateResponse(request, "monitor_form.html", {
         "monitor": None, "user": user, "error": None,
         "notifications": notifications, "available_tags": available_tags,
+        "groups": groups,
         "kuma_configured": bool(kuma_url), "selected_tag_ids": [],
     })
 
@@ -158,6 +165,7 @@ async def monitor_new_post(
     tag_ids: List[int] = Form(default=[]),
     new_tag_names: List[str] = Form(default=[]),
     new_tag_colors: List[str] = Form(default=[]),
+    kuma_group_id: Optional[int] = Form(None),
     verify_ssl: Optional[str] = Form(None),  # checkbox: present="true", absent=None
     db: Session = Depends(get_db),
     user: str = Depends(require_auth),
@@ -171,6 +179,7 @@ async def monitor_new_post(
             request, "monitor_form.html",
             {"monitor": None, "user": user, "error": msg,
              "notifications": _fetch_notifications(), "available_tags": available_tags,
+             "groups": _fetch_groups(),
              "kuma_configured": bool(kuma_url), "selected_tag_ids": tag_ids},
             status_code=status,
         )
@@ -191,6 +200,7 @@ async def monitor_new_post(
         max_response_ms=max_response_ms,
         notification_ids=notification_ids or [],
         tag_ids=tag_ids or [],
+        kuma_group_id=kuma_group_id,
         verify_ssl=verify_ssl is not None,
     )
     db.add(monitor)
@@ -222,6 +232,7 @@ async def monitor_edit_get(
     kuma_url, kuma_user, kuma_pass = _kuma_creds(db)
     notifications = _fetch_notifications()
     available_tags = _fetch_tags()
+    groups = _fetch_groups()
     task_counts = dict(
         db.query(KumaTask.status, __import__("sqlalchemy").func.count(KumaTask.id))
         .filter(KumaTask.monitor_id == monitor_id, KumaTask.status.in_(["pending", "failed"]))
@@ -246,6 +257,7 @@ async def monitor_edit_get(
         "monitor": monitor, "user": user, "error": None,
         "notifications": notifications, "kuma_configured": bool(kuma_url),
         "available_tags": available_tags,
+        "groups": groups,
         "selected_tag_ids": selected_tag_ids,
         "pending_new_tags": pending_new_tags,
         "pending_tasks": task_counts.get("pending", 0),
@@ -268,6 +280,7 @@ async def monitor_edit_post(
     tag_ids: List[int] = Form(default=[]),
     new_tag_names: List[str] = Form(default=[]),
     new_tag_colors: List[str] = Form(default=[]),
+    kuma_group_id: Optional[int] = Form(None),
     verify_ssl: Optional[str] = Form(None),  # checkbox: present="true", absent=None
     db: Session = Depends(get_db),
     user: str = Depends(require_auth),
@@ -286,6 +299,7 @@ async def monitor_edit_post(
             {"monitor": monitor, "user": user, "error": msg,
              "notifications": _fetch_notifications(), "kuma_configured": bool(kuma_url),
              "available_tags": available_tags, "selected_tag_ids": tag_ids,
+             "groups": _fetch_groups(),
              "pending_tasks": 0, "failed_tasks": 0,
              "timezone": (cfg.timezone or "UTC") if cfg else "UTC"},
             status_code=status,
@@ -305,6 +319,7 @@ async def monitor_edit_post(
     name_changed = monitor.name != name
     interval_changed = monitor.interval != interval
     notifications_changed = sorted(monitor.notification_ids or []) != sorted(notification_ids)
+    group_changed = monitor.kuma_group_id != kuma_group_id
 
     monitor.name = name
     monitor.url = url
@@ -314,10 +329,11 @@ async def monitor_edit_post(
     monitor.max_response_ms = max_response_ms
     monitor.notification_ids = notification_ids
     monitor.tag_ids = list(new_tag_ids)
+    monitor.kuma_group_id = kuma_group_id
     monitor.verify_ssl = verify_ssl is not None
     db.commit()
 
-    if monitor.kuma_synced and monitor.kuma_monitor_id and (name_changed or interval_changed or notifications_changed):
+    if monitor.kuma_synced and monitor.kuma_monitor_id and (name_changed or interval_changed or notifications_changed or group_changed):
         if kuma_url:
             from ..kuma_queue import enqueue
             fields = {}
@@ -327,6 +343,8 @@ async def monitor_edit_post(
                 fields["interval"] = interval + max(30, interval // 2)
             if notifications_changed:
                 fields["notificationIDList"] = {str(nid): True for nid in notification_ids}
+            if group_changed:
+                fields["parent"] = kuma_group_id
             enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
                     monitor.name, monitor_id=monitor_id)
 

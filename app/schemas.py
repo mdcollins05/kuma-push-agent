@@ -14,6 +14,11 @@ class TagResponse(BaseModel):
     color: str = Field(..., description="Tag color as a hex string", examples=["#3396FF"])
 
 
+class GroupResponse(BaseModel):
+    kuma_id: int = Field(..., description="Uptime Kuma group monitor ID")
+    name: str = Field(..., description="Group name")
+
+
 class TagCreate(BaseModel):
     name: str = Field(..., description="Tag name", examples=["production"])
     color: str = Field(..., description="Tag color as a hex string", examples=["#3396FF"])
@@ -34,6 +39,7 @@ class MonitorCreate(BaseModel):
     verify_ssl: bool = Field(True, description="Reject invalid or self-signed TLS certificates", examples=[True])
     tag_ids: List[int] = Field([], description="Uptime Kuma tag IDs to apply to the monitor", examples=[[]])
     notification_ids: List[int] = Field([], description="Uptime Kuma notification channel IDs to alert on status change", examples=[[]])
+    kuma_group_id: Optional[int] = Field(None, description="Uptime Kuma group monitor ID to nest this monitor under, or null for top level")
 
     model_config = {
         "json_schema_extra": {
@@ -47,6 +53,7 @@ class MonitorCreate(BaseModel):
                     "verify_ssl": True,
                     "tag_ids": [],
                     "notification_ids": [],
+                    "kuma_group_id": None,
                 }
             ]
         }
@@ -137,6 +144,7 @@ class MonitorResponse(BaseModel):
     last_error: Optional[str] = Field(None, description="Error message from the most recent failed check")
     tag_ids: List[int] = Field(..., description="Uptime Kuma tag IDs applied to this monitor")
     notification_ids: List[int] = Field(..., description="Uptime Kuma notification channel IDs configured for this monitor")
+    kuma_group_id: Optional[int] = Field(None, description="Uptime Kuma group monitor ID this monitor is nested under, or null for top level")
     enabled: bool = Field(..., description="Whether the check scheduler is active for this monitor")
 
     model_config = {"from_attributes": True}

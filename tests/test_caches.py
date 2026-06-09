@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch
 
-from app.models import KumaNotification, KumaTag
+from app.models import KumaGroup, KumaNotification, KumaTag
 from tests.conftest import HEADERS, testing_session_factory
 
 
@@ -225,6 +225,78 @@ class TestTagCacheRefresh:
             with _patch_session(), patch("app.kuma.get_tags", side_effect=RuntimeError("timeout")):
                 with pytest.raises(RuntimeError, match="timeout"):
                     tc.refresh(raise_on_error=True)
+        finally:
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
+            db_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# group_cache
+# ---------------------------------------------------------------------------
+
+class TestGroupCacheRefresh:
+    def test_unconfigured_clears_db_rows_and_cache(self, db_session):
+        import app.group_cache as gc
+
+        db_session.add(KumaGroup(id=30, name="stale"))
+        db_session.commit()
+        gc._cache = [{"kuma_id": 30, "name": "stale"}]
+
+        with _patch_session():
+            gc.refresh()
+
+        assert gc.get() == []
+        assert db_session.query(KumaGroup).count() == 0
+
+    def test_configured_syncs_cache_and_db(self, db_session):
+        from app.models import AppSettings
+        import app.group_cache as gc
+
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
+        db_session.commit()
+
+        kuma_data = [{"kuma_id": 100, "name": "Production"}, {"kuma_id": 101, "name": "Staging"}]
+
+        try:
+            with _patch_session(), patch("app.kuma.get_groups", return_value=kuma_data):
+                gc.refresh()
+
+            cache = gc.get()
+            assert len(cache) == 2
+            assert {"kuma_id": 100, "name": "Production"} in cache
+            assert db_session.query(KumaGroup).filter_by(id=100).count() == 1
+        finally:
+            db_session.query(KumaGroup).delete()
+            cfg = db_session.get(AppSettings, 1)
+            cfg.configured = False
+            cfg.kuma_url = None
+            cfg.kuma_username = None
+            cfg.kuma_password = None
+            db_session.commit()
+
+    def test_raise_on_error_propagates_exception(self, db_session):
+        from app.models import AppSettings
+        import app.group_cache as gc
+
+        cfg = db_session.get(AppSettings, 1)
+        cfg.configured = True
+        cfg.kuma_url = "http://kuma"
+        cfg.kuma_username = "u"
+        cfg.kuma_password = "p"
+        db_session.commit()
+
+        try:
+            with _patch_session(), patch("app.kuma.get_groups", side_effect=RuntimeError("kaboom")):
+                with pytest.raises(RuntimeError, match="kaboom"):
+                    gc.refresh(raise_on_error=True)
         finally:
             cfg = db_session.get(AppSettings, 1)
             cfg.configured = False

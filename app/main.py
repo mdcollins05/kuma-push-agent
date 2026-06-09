@@ -11,7 +11,7 @@ from .database import engine
 from .dependencies import LoginRequired, SetupRequired
 from .models import AppSettings, Base
 from .routers import api, auth, dashboard, monitors, settings as settings_router, tasks as tasks_router
-from .scheduler import scheduler, add_check_job, start_kuma_task_processor, start_notification_cache_refresher, start_tag_cache_refresher, start_update_checker
+from .scheduler import scheduler, add_check_job, start_group_cache_refresher, start_kuma_task_processor, start_notification_cache_refresher, start_tag_cache_refresher, start_update_checker
 from .seed import seed_from_yaml
 
 logging.basicConfig(level=logging.INFO)
@@ -68,12 +68,17 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
             "ALTER TABLE app_settings ADD COLUMN last_update_check DATETIME",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
+            "ALTER TABLE monitors ADD COLUMN kuma_group_id INTEGER",
             """CREATE TABLE IF NOT EXISTS kuma_tags (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 color TEXT NOT NULL
             )""",
             """CREATE TABLE IF NOT EXISTS kuma_notifications (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS kuma_groups (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL
             )""",
@@ -114,9 +119,13 @@ async def lifespan(app: FastAPI):
     from .tag_cache import load_from_db as _load_tags_from_db
     _load_tags_from_db()
 
+    from .group_cache import load_from_db as _load_groups_from_db
+    _load_groups_from_db()
+
     start_kuma_task_processor()
     start_notification_cache_refresher()
     start_tag_cache_refresher()
+    start_group_cache_refresher()
     start_update_checker()
     scheduler.start()
     logger.info("Kuma Push Agent v%s started — %d monitor tasks scheduled", APP_VERSION, len(scheduler.get_jobs()))
@@ -142,6 +151,7 @@ app = FastAPI(
         {"name": "Settings", "description": "Configure application and Uptime Kuma connection."},
         {"name": "Tags", "description": "View and create Uptime Kuma tags."},
         {"name": "Notifications", "description": "View Uptime Kuma notification channels."},
+        {"name": "Groups", "description": "View Uptime Kuma group monitors."},
         {"name": "Monitors", "description": "Create, read, update, and delete health-check monitors."},
     ],
     swagger_ui_parameters={"persistAuthorization": True},

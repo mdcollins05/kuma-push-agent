@@ -96,6 +96,63 @@ def test_create_invalid_status_code(client):
     assert resp.status_code == 422
 
 
+def test_create_persists_group_id(client):
+    resp = client.post("/api/v1/monitors", json={
+        "name": "Grouped Monitor",
+        "url": "https://grouped.example.com",
+        "kuma_group_id": 42,
+    }, headers=HEADERS)
+    assert resp.status_code == 201
+    body = resp.json()
+    try:
+        assert body["kuma_group_id"] == 42
+    finally:
+        client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+
+
+def test_create_without_group_returns_null(client):
+    resp = client.post("/api/v1/monitors", json={
+        "name": "Top-Level Monitor",
+        "url": "https://top.example.com",
+    }, headers=HEADERS)
+    assert resp.status_code == 201
+    body = resp.json()
+    try:
+        assert body["kuma_group_id"] is None
+    finally:
+        client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+
+
+def test_update_persists_group_id(client):
+    create = client.post("/api/v1/monitors", json={
+        "name": "Group Update Test",
+        "url": "https://groupupdate.example.com",
+    }, headers=HEADERS)
+    assert create.status_code == 201
+    mid = create.json()["id"]
+    try:
+        resp = client.put(f"/api/v1/monitors/{mid}", json={
+            "name": "Group Update Test",
+            "url": "https://groupupdate.example.com",
+            "kuma_group_id": 7,
+        }, headers=HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["kuma_group_id"] == 7
+
+        resp = client.get(f"/api/v1/monitors/{mid}", headers=HEADERS)
+        assert resp.json()["kuma_group_id"] == 7
+
+        resp = client.put(f"/api/v1/monitors/{mid}", json={
+            "name": "Group Update Test",
+            "url": "https://groupupdate.example.com",
+            "kuma_group_id": None,
+        }, headers=HEADERS)
+        assert resp.status_code == 200
+        assert resp.json()["kuma_group_id"] is None
+    finally:
+        client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
+
+
 def test_create_persists_tag_and_notification_ids(client):
     resp = client.post("/api/v1/monitors", json={
         "name": "Tagged Monitor",

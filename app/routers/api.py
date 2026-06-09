@@ -5,11 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, require_api_key
+from ..group_cache import get as get_groups
 from ..models import AppSettings, KumaTask, Monitor
 from ..monitor_status import monitor_status_dict
 from ..notification_cache import get as get_notifications
 from ..passwords import hash_password
 from ..schemas import (
+    GroupResponse,
     KumaSettingsRequest, KumaSettingsResponse,
     MonitorCreate, MonitorResponse, MonitorStatus, MonitorUpdate,
     NotificationResponse,
@@ -132,6 +134,17 @@ def list_notifications():
 
 
 @router.get(
+    "/groups",
+    response_model=List[GroupResponse],
+    tags=["Groups"],
+    summary="List all monitor groups",
+    description="Returns all Uptime Kuma group monitors from the local cache. The cache refreshes every 5 minutes.",
+)
+def list_groups():
+    return [GroupResponse(kuma_id=g["kuma_id"], name=g["name"]) for g in get_groups()]
+
+
+@router.get(
     "/monitors",
     response_model=List[MonitorResponse],
     tags=["Monitors"],
@@ -241,6 +254,7 @@ def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
         verify_ssl=payload.verify_ssl,
         tag_ids=payload.tag_ids,
         notification_ids=payload.notification_ids,
+        kuma_group_id=payload.kuma_group_id,
     )
     db.add(monitor)
     db.commit()
@@ -268,6 +282,7 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     interval_changed = monitor.interval != payload.interval
     notifications_changed = sorted(monitor.notification_ids or []) != sorted(payload.notification_ids or [])
     tags_changed = old_tag_ids != new_tag_ids
+    group_changed = monitor.kuma_group_id != payload.kuma_group_id
 
     monitor.name = payload.name
     monitor.url = payload.url
@@ -277,6 +292,7 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     monitor.verify_ssl = payload.verify_ssl
     monitor.tag_ids = list(new_tag_ids)
     monitor.notification_ids = payload.notification_ids
+    monitor.kuma_group_id = payload.kuma_group_id
     db.commit()
 
     app_cfg = db.get(AppSettings, 1)
@@ -284,7 +300,7 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
 
     if monitor.kuma_synced and monitor.kuma_monitor_id and kuma_url:
         from ..kuma_queue import enqueue
-        if name_changed or interval_changed or notifications_changed:
+        if name_changed or interval_changed or notifications_changed or group_changed:
             fields = {}
             if name_changed:
                 fields["name"] = payload.name
@@ -292,7 +308,9 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
                 fields["interval"] = payload.interval + max(30, payload.interval // 2)
             if notifications_changed:
                 fields["notificationIDList"] = {str(nid): True for nid in (payload.notification_ids or [])}
-            enqueue(db, "update", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+            if group_changed:
+                fields["parent"] = payload.kuma_group_id
+            enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
                     monitor.name, monitor_id=monitor_id)
         if tags_changed:
             enqueue(db, "update_tags", {
@@ -324,7 +342,7 @@ def delete_monitor_api(monitor_id: int, db: Session = Depends(get_db)):
         app_cfg = db.get(AppSettings, 1)
         if app_cfg and app_cfg.kuma_url:
             from ..kuma_queue import enqueue
-            enqueue(db, "delete", {"kuma_monitor_id": monitor.kuma_monitor_id},
+            enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id},
                     monitor.name, monitor_id=monitor_id)
 
     remove_check_job(monitor_id)
@@ -343,6 +361,7 @@ def _to_response(m: Monitor) -> MonitorResponse:
         verify_ssl=m.verify_ssl,
         tag_ids=m.tag_ids or [],
         notification_ids=m.notification_ids or [],
+        kuma_group_id=m.kuma_group_id,
         kuma_synced=m.kuma_synced,
         last_status=m.last_status,
         last_check_time=m.last_check_time.isoformat() if m.last_check_time else None,
