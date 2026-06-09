@@ -21,3 +21,6 @@ templates.env.filters["local_dt"] = _local_dt
 
 from .config import APP_VERSION
 templates.env.globals["app_version"] = APP_VERSION
+
+from .update_cache import get as get_update_info
+templates.env.globals["update_info"] = get_update_info

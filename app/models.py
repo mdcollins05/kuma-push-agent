@@ -77,3 +77,4 @@ class AppSettings(Base):
     ui_password_hash = Column(String, nullable=True)
     api_key = Column(String, nullable=True)
     timezone = Column(String, nullable=True, default="UTC")
+    last_update_check = Column(DateTime, nullable=True)
