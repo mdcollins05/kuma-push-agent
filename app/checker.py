@@ -60,6 +60,16 @@ def run_check(monitor_id: int) -> None:
 
         if not monitor.kuma_synced:
             logger.info("run_check kuma sync: monitor_id=%d kuma_monitor_id=%s", monitor_id, monitor.kuma_monitor_id)
+            from .models import KumaTask
+            sync_task = KumaTask(
+                task_type="sync_monitor",
+                payload={"monitor_id": monitor_id},
+                monitor_name=monitor.name,
+                monitor_id=monitor_id,
+                status="pending",
+            )
+            db.add(sync_task)
+            db.commit()
             try:
                 if not monitor.kuma_monitor_id:
                     kuma_id = create_push_monitor(
@@ -83,9 +93,13 @@ def run_check(monitor_id: int) -> None:
                 )
                 monitor.push_token = push_token
                 monitor.kuma_synced = True
+                sync_task.status = "done"
                 db.commit()
             except Exception as exc:
                 logger.warning("Kuma sync failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
+                sync_task.status = "failed"
+                sync_task.error = f"{type(exc).__name__}: {exc}"[:1000]
+                db.commit()
                 return
 
         if monitor.push_token:

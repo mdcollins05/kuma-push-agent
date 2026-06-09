@@ -109,13 +109,13 @@ def _run(task, app_cfg) -> None:
     pw = app_cfg.kuma_password
     p = task.payload
 
-    if task.task_type == "update":
+    if task.task_type == "update_monitor":
         update_monitor(p["kuma_monitor_id"], url, user, pw, **p["fields"])
-    elif task.task_type == "pause":
+    elif task.task_type == "pause_monitor":
         pause_monitor(p["kuma_monitor_id"], url, user, pw)
-    elif task.task_type == "resume":
+    elif task.task_type == "resume_monitor":
         resume_monitor(p["kuma_monitor_id"], url, user, pw)
-    elif task.task_type == "delete":
+    elif task.task_type == "delete_monitor":
         try:
             delete_monitor(p["kuma_monitor_id"], url, user, pw)
         except Exception as exc:
@@ -180,5 +180,7 @@ def _run(task, app_cfg) -> None:
             refresh_tag_cache()
         except Exception as exc:
             logger.warning("Tag cache refresh failed after create_tag: %s: %s", type(exc).__name__, exc, exc_info=True)
+    elif task.task_type == "sync_monitor":
+        pass  # resolved inline by checker.py; should not reach the queue processor
     else:
         raise ValueError(f"Unknown task type: {task.task_type}")

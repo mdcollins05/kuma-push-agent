@@ -33,7 +33,27 @@ async def lifespan(app: FastAPI):
                 conn.execute(__import__("sqlalchemy").text(ddl))
                 conn.commit()
             except Exception:
-                pass
+                pass  # idempotent — table/column already renamed or doesn't exist yet
+
+    # Rename legacy task type strings — must not be silently swallowed on real errors
+    # because _run() no longer handles the old names and would fail those tasks permanently.
+    from sqlalchemy.exc import OperationalError
+    with engine.connect() as conn:
+        for ddl in [
+            "UPDATE kuma_tasks SET task_type = 'update_monitor' WHERE task_type = 'update'",
+            "UPDATE kuma_tasks SET task_type = 'pause_monitor' WHERE task_type = 'pause'",
+            "UPDATE kuma_tasks SET task_type = 'resume_monitor' WHERE task_type = 'resume'",
+            "UPDATE kuma_tasks SET task_type = 'delete_monitor' WHERE task_type = 'delete'",
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(ddl))
+                conn.commit()
+            except OperationalError as exc:
+                if "no such table" in str(exc).lower():
+                    pass  # fresh install — table created by create_all below
+                else:
+                    logger.error("Task type migration failed: %s — %s", ddl, exc)
+                    raise
 
     Base.metadata.create_all(bind=engine)
 
@@ -72,7 +92,7 @@ async def lifespan(app: FastAPI):
         # Reset failed delete tasks — if the Kuma monitor is already gone, they'll
         # resolve immediately under the updated "does not exist" success logic.
         from .models import KumaTask
-        db.query(KumaTask).filter_by(task_type="delete", status="failed").update(
+        db.query(KumaTask).filter_by(task_type="delete_monitor", status="failed").update(
             {"status": "pending", "retry_count": 0, "next_retry_at": None, "error": None},
             synchronize_session=False,
         )
