@@ -1,6 +1,6 @@
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +72,13 @@ def refresh(raise_on_error: bool = False) -> None:
 
         with _lock:
             _cache = [{"id": n["id"], "name": n["name"]} for n in notifications]
-            _last_run = datetime.utcnow()
+            _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = None
         logger.debug("Notification cache refreshed from Kuma: %d entries", len(notifications))
     except Exception as exc:
         logger.warning("Notification cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=True)
         with _lock:
-            _last_run = datetime.utcnow()
+            _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = f"{type(exc).__name__}: {exc}"
         if raise_on_error:
             raise

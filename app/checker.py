@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -47,7 +47,7 @@ def run_check(monitor_id: int) -> None:
             msg = str(exc)[:200]
 
         monitor.last_status = status
-        monitor.last_check_time = datetime.utcnow()
+        monitor.last_check_time = datetime.now(timezone.utc).replace(tzinfo=None)
         monitor.last_response_ms = elapsed_ms
         monitor.last_error = None if status == "up" else msg
         db.commit()

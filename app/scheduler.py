@@ -9,10 +9,10 @@ scheduler = BackgroundScheduler(
 
 
 def add_check_job(monitor_id: int, interval: int, last_check_time=None) -> None:
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from .checker import run_check  # lazy import avoids circular dependency
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if last_check_time is None:
         next_run = now
     else:
@@ -76,7 +76,7 @@ def start_notification_cache_refresher() -> None:
 
 
 def start_tag_cache_refresher() -> None:
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from .tag_cache import refresh
 
     scheduler.add_job(
@@ -92,7 +92,7 @@ def start_tag_cache_refresher() -> None:
         refresh,
         "date",
         id="tag_cache_initial",
-        run_date=datetime.utcnow() + timedelta(seconds=5),
+        run_date=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=5),
     )
 
 

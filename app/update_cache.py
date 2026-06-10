@@ -1,6 +1,6 @@
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -29,9 +29,9 @@ def next_run_time() -> datetime:
     finally:
         db.close()
     if last is None:
-        return datetime.utcnow()
+        return datetime.now(timezone.utc).replace(tzinfo=None)
     due = last + timedelta(hours=CHECK_INTERVAL_HOURS)
-    return due if due > datetime.utcnow() else datetime.utcnow()
+    return due if due > datetime.now(timezone.utc).replace(tzinfo=None) else datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def get() -> dict:
@@ -49,7 +49,7 @@ def refresh() -> None:
         return
 
     global _latest_version, _update_available, _last_run, _last_error
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -75,7 +75,7 @@ def test_monitor_status_includes_task_counts(client):
             monitor_name="Task Count Test",
             payload={"kuma_monitor_id": 1, "fields": {}},
             status="failed",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(task)
         db.commit()
@@ -193,7 +193,7 @@ def test_tasks_status_reflects_inserted_task(client):
             monitor_name="Tasks Status Test",
             payload={"kuma_monitor_id": 99},
             status="pending",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(task)
         db.commit()

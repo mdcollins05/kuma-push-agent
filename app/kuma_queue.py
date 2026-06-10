@@ -1,6 +1,6 @@
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 COMPLETED_TASK_TTL_HOURS = 24
 
@@ -56,7 +56,7 @@ def process_kuma_tasks() -> None:
         if not app_cfg or not app_cfg.configured:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         pending = (
             db.query(KumaTask)
             .filter(
@@ -77,24 +77,24 @@ def process_kuma_tasks() -> None:
                 if task.retry_count < MAX_RETRIES:
                     task.retry_count += 1
                     task.status = "pending"
-                    task.next_retry_at = datetime.utcnow() + timedelta(seconds=BASE_RETRY_SECONDS * (2 ** (task.retry_count - 1)))
+                    task.next_retry_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=BASE_RETRY_SECONDS * (2 ** (task.retry_count - 1)))
                     task.error = error_msg
                 else:
                     task.status = "failed"
                     task.error = error_msg
             db.commit()
-        cutoff = datetime.utcnow() - timedelta(hours=COMPLETED_TASK_TTL_HOURS)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=COMPLETED_TASK_TTL_HOURS)
         db.query(KumaTask).filter(
             KumaTask.status.in_(["done", "cancelled"]),
             KumaTask.created_at < cutoff,
         ).delete(synchronize_session=False)
         db.commit()
         with _status_lock:
-            _last_run = datetime.utcnow()
+            _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = None
     except Exception as exc:
         with _status_lock:
-            _last_run = datetime.utcnow()
+            _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = f"{type(exc).__name__}: {exc}"
         raise
     finally:
