@@ -24,13 +24,16 @@ def _check_http(config: dict) -> tuple[str, str, int]:
             resp = client.request(method, url, headers=headers, content=body if body else None)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
-        ok = resp.status_code in expected_codes
-        if ok and keyword:
-            ok = keyword in resp.text
+        code_ok = resp.status_code in expected_codes
+        keyword_ok = (keyword in resp.text) if (code_ok and keyword) else True
+        ok = code_ok and keyword_ok
         if ok and max_response_ms and elapsed_ms > max_response_ms:
             return "down", f"Response time {elapsed_ms} ms exceeded limit of {max_response_ms} ms", elapsed_ms
-        msg = "OK" if ok else f"HTTP {resp.status_code}"
-        return ("up" if ok else "down"), msg, elapsed_ms
+        if ok:
+            return "up", "OK", elapsed_ms
+        if not code_ok:
+            return "down", f"HTTP {resp.status_code}", elapsed_ms
+        return "down", f"Keyword \"{keyword}\" not found in response", elapsed_ms
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - start) * 1000)
         return "down", str(exc)[:200], elapsed_ms
