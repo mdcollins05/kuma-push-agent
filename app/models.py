@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String
 
@@ -30,7 +30,7 @@ class Monitor(Base):
     last_error = Column(String, nullable=True)
 
     enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class KumaTask(Base):
@@ -45,7 +45,7 @@ class KumaTask(Base):
     error = Column(String, nullable=True)
     retry_count = Column(Integer, default=0)
     next_retry_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class KumaTag(Base):
