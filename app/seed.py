@@ -2,8 +2,10 @@ import logging
 import pathlib
 
 import yaml
+from pydantic import ValidationError
 
 from .models import Monitor
+from .schemas import HttpConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +26,12 @@ def seed_from_yaml(db, seed_file: str) -> None:
         return
 
     monitors = data.get("monitors") or []
+    seeded = 0
     for entry in monitors:
-        config = entry.get("config")
-        if not isinstance(config, dict):
+        raw_config = entry.get("config")
+        if not isinstance(raw_config, dict):
             # Build from flat YAML keys (pre-v0.3.0 format).
-            config = {
+            raw_config = {
                 "type": "http",
                 "url": entry.get("url", ""),
                 "method": (entry.get("method") or "GET").upper(),
@@ -37,16 +40,30 @@ def seed_from_yaml(db, seed_file: str) -> None:
                 "expected_codes": entry.get("expected_codes", [200]),
                 "keyword": entry.get("keyword") or None,
                 "max_response_ms": entry.get("max_response_ms"),
-                "verify_ssl": bool(entry.get("verify_ssl", True)),
+                "verify_ssl": entry.get("verify_ssl", True),
             }
         else:
-            config.setdefault("type", "http")
+            raw_config.setdefault("type", "http")
+
+        # Route the seed config through the same schema the API uses so
+        # malformed YAML is rejected up-front rather than persisted as a
+        # broken monitor that only blows up at check time.
+        try:
+            validated = HttpConfig.model_validate(raw_config)
+        except ValidationError as exc:
+            logger.warning(
+                "Skipping invalid seed entry %r: %s",
+                entry.get("name", "<unnamed>"), exc.errors(),
+            )
+            continue
+
         monitor = Monitor(
             name=entry.get("name", "Unnamed"),
             interval=int(entry.get("interval", 60)),
-            config=config,
+            config=validated.model_dump(),
         )
         db.add(monitor)
+        seeded += 1
 
     db.commit()
-    logger.info("Seeded %d monitors from %s", len(monitors), seed_file)
+    logger.info("Seeded %d monitors from %s", seeded, seed_file)

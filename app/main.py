@@ -40,10 +40,14 @@ def _migrate_monitor_config(target_engine) -> None:
             if existing:
                 try:
                     parsed = _json.loads(existing) if isinstance(existing, str) else existing
-                    if parsed:
-                        continue  # already migrated
-                except Exception:
-                    pass
+                except (TypeError, ValueError):
+                    parsed = None
+                # Only skip rows whose config already matches the new contract
+                # (dict with a discriminator). Anything else — empty dict, list,
+                # string, malformed JSON — falls through and is rebuilt from
+                # the legacy columns before they're dropped.
+                if isinstance(parsed, dict) and parsed.get("type"):
+                    continue
             expected = row_map.get("expected_codes")
             if isinstance(expected, str):
                 try:

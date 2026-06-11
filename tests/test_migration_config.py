@@ -122,3 +122,56 @@ def test_migration_skips_when_no_legacy_columns(tmp_path):
         conn.commit()
 
     _migrate_monitor_config(engine)  # should not raise
+
+
+def test_migration_rebuilds_config_when_existing_value_lacks_discriminator(tmp_path):
+    """A row whose `config` is stale or malformed (no `type` key) must be
+    rebuilt from the legacy columns rather than left as-is.
+
+    This is the regression for the post-PR-23 review concern: previously
+    any truthy `config` value was treated as already-migrated, so a row
+    that had been partially written (or contained legacy junk) would have
+    its legacy columns dropped while the bad `config` survived.
+    """
+    from app.main import _migrate_monitor_config
+
+    db_path = tmp_path / "stale.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE monitors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                interval INTEGER DEFAULT 60,
+                expected_codes TEXT,
+                keyword TEXT,
+                max_response_ms INTEGER,
+                verify_ssl BOOLEAN DEFAULT 1,
+                config TEXT
+            )
+        """))
+        conn.execute(text("""
+            INSERT INTO monitors (name, url, expected_codes, config) VALUES
+                ('Empty dict',  'https://a.test', '[200]', '{}'),
+                ('No type key', 'https://b.test', '[200]', '{"url": "stale"}'),
+                ('Not JSON',    'https://c.test', '[200]', 'garbage'),
+                ('Legit',       'https://d.test', '[201]', '{"type": "http", "url": "kept"}')
+        """))
+        conn.commit()
+
+    _migrate_monitor_config(engine)
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT name, config FROM monitors ORDER BY name")).fetchall()
+    parsed = {name: json.loads(cfg) for name, cfg in rows}
+
+    assert parsed["Empty dict"]["type"] == "http"
+    assert parsed["Empty dict"]["url"] == "https://a.test"
+    assert parsed["No type key"]["type"] == "http"
+    assert parsed["No type key"]["url"] == "https://b.test"  # NOT "stale"
+    assert parsed["Not JSON"]["type"] == "http"
+    assert parsed["Not JSON"]["url"] == "https://c.test"
+    # The well-formed row is left alone.
+    assert parsed["Legit"]["url"] == "kept"

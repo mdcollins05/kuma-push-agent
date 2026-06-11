@@ -81,6 +81,8 @@ def test_keyword_required(monkeypatch):
         "keyword": "healthy",
     })
     assert status == "down"
+    assert "Keyword" in msg
+    assert "healthy" in msg
 
 
 def test_unexpected_status_code(monkeypatch):

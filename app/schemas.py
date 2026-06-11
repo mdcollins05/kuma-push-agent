@@ -54,12 +54,28 @@ class HttpConfig(BaseModel):
     )
     verify_ssl: bool = Field(True, description="Reject invalid or self-signed TLS certificates")
 
+    @field_validator("url")
+    @classmethod
+    def url_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("url must not be blank")
+        return v
+
     @field_validator("expected_codes")
     @classmethod
     def codes_valid(cls, v: List[int]) -> List[int]:
+        if not v:
+            raise ValueError("expected_codes must contain at least one status code")
         for c in v:
             if not (100 <= c <= 599):
                 raise ValueError(f"invalid HTTP status code: {c}")
+        return v
+
+    @field_validator("max_response_ms")
+    @classmethod
+    def max_response_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("max_response_ms must be greater than 0")
         return v
 
 

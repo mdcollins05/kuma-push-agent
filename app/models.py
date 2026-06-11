@@ -12,7 +12,7 @@ class Monitor(Base):
     name = Column(String, nullable=False, unique=True)
 
     interval = Column(Integer, default=60)
-    config = Column(JSON, nullable=False, default=dict)  # check-type-specific fields, includes "type" discriminator
+    config = Column(JSON, nullable=False)  # check-type-specific fields, includes "type" discriminator — callers must populate
     notification_ids = Column(JSON, nullable=True, default=list)
     tag_ids = Column(JSON, nullable=True, default=list)
 

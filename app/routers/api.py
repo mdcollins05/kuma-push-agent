@@ -349,7 +349,7 @@ def _to_response(m: Monitor) -> MonitorResponse:
         id=m.id,
         name=m.name,
         interval=m.interval,
-        config=m.config or {"type": "http", "url": ""},
+        config=m.config,
         tag_ids=m.tag_ids or [],
         notification_ids=m.notification_ids or [],
         kuma_group_id=m.kuma_group_id,
