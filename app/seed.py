@@ -25,13 +25,26 @@ def seed_from_yaml(db, seed_file: str) -> None:
 
     monitors = data.get("monitors") or []
     for entry in monitors:
+        config = entry.get("config")
+        if not isinstance(config, dict):
+            # Build from flat YAML keys (pre-v0.3.0 format).
+            config = {
+                "type": "http",
+                "url": entry.get("url", ""),
+                "method": (entry.get("method") or "GET").upper(),
+                "headers": entry.get("headers") or {},
+                "body": entry.get("body"),
+                "expected_codes": entry.get("expected_codes", [200]),
+                "keyword": entry.get("keyword") or None,
+                "max_response_ms": entry.get("max_response_ms"),
+                "verify_ssl": bool(entry.get("verify_ssl", True)),
+            }
+        else:
+            config.setdefault("type", "http")
         monitor = Monitor(
             name=entry.get("name", "Unnamed"),
-            url=entry.get("url", ""),
             interval=int(entry.get("interval", 60)),
-            expected_codes=entry.get("expected_codes", [200]),
-            keyword=entry.get("keyword") or None,
-            verify_ssl=bool(entry.get("verify_ssl", True)),
+            config=config,
         )
         db.add(monitor)
 

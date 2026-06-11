@@ -18,6 +18,68 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _migrate_monitor_config(target_engine) -> None:
+    """v0.3.0 migration: fold per-type HTTP fields into `config` JSON, drop legacy columns.
+
+    Idempotent — skips rows whose `config` is already populated, and skips the whole
+    block when no legacy columns remain in the table.
+    """
+    import json as _json
+    sa = __import__("sqlalchemy")
+    with target_engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(sa.text("PRAGMA table_info(monitors)")).fetchall()}
+        legacy_cols = {"url", "expected_codes", "keyword", "max_response_ms", "verify_ssl"}
+        present_legacy = legacy_cols & cols
+        if not present_legacy:
+            return
+        select_cols = ["id", "config"] + sorted(present_legacy)
+        rows = conn.execute(sa.text(f"SELECT {', '.join(select_cols)} FROM monitors")).fetchall()
+        for row in rows:
+            row_map = dict(zip(select_cols, row))
+            existing = row_map.get("config")
+            if existing:
+                try:
+                    parsed = _json.loads(existing) if isinstance(existing, str) else existing
+                    if parsed:
+                        continue  # already migrated
+                except Exception:
+                    pass
+            expected = row_map.get("expected_codes")
+            if isinstance(expected, str):
+                try:
+                    expected = _json.loads(expected)
+                except Exception:
+                    expected = [200]
+            new_config = {
+                "type": "http",
+                "url": row_map.get("url") or "",
+                "method": "GET",
+                "headers": {},
+                "body": None,
+                "expected_codes": expected or [200],
+                "keyword": row_map.get("keyword"),
+                "max_response_ms": row_map.get("max_response_ms"),
+                "verify_ssl": bool(row_map.get("verify_ssl")) if row_map.get("verify_ssl") is not None else True,
+            }
+            conn.execute(
+                sa.text("UPDATE monitors SET config = :config WHERE id = :id"),
+                {"config": _json.dumps(new_config), "id": row_map["id"]},
+            )
+        conn.commit()
+        for ddl in [
+            "ALTER TABLE monitors DROP COLUMN url",
+            "ALTER TABLE monitors DROP COLUMN expected_codes",
+            "ALTER TABLE monitors DROP COLUMN keyword",
+            "ALTER TABLE monitors DROP COLUMN max_response_ms",
+            "ALTER TABLE monitors DROP COLUMN verify_ssl",
+        ]:
+            try:
+                conn.execute(sa.text(ddl))
+                conn.commit()
+            except Exception as exc:
+                logger.warning("Could not drop legacy column (%s): %s", ddl, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from .database import SessionLocal
@@ -69,6 +131,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE app_settings ADD COLUMN last_update_check DATETIME",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
             "ALTER TABLE monitors ADD COLUMN kuma_group_id INTEGER",
+            "ALTER TABLE monitors ADD COLUMN config TEXT",
             """CREATE TABLE IF NOT EXISTS kuma_tags (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -88,6 +151,8 @@ async def lifespan(app: FastAPI):
                 conn.commit()
             except Exception:
                 pass
+
+    _migrate_monitor_config(engine)
 
     db = SessionLocal()
     try:

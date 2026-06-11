@@ -11,14 +11,10 @@ class Monitor(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
 
-    url = Column(String, nullable=False)
     interval = Column(Integer, default=60)
-    expected_codes = Column(JSON, default=lambda: [200])
-    keyword = Column(String, nullable=True)
-    max_response_ms = Column(Integer, nullable=True)
+    config = Column(JSON, nullable=False, default=dict)  # check-type-specific fields, includes "type" discriminator
     notification_ids = Column(JSON, nullable=True, default=list)
     tag_ids = Column(JSON, nullable=True, default=list)
-    verify_ssl = Column(Boolean, default=True)
 
     kuma_monitor_id = Column(Integer, nullable=True)
     kuma_group_id = Column(Integer, nullable=True)
