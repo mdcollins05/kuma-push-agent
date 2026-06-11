@@ -32,14 +32,18 @@ def run_check(monitor_id: int) -> None:
                 resp = client.get(monitor.url)
             elapsed_ms = int((time.monotonic() - start) * 1000)
 
-            ok = resp.status_code in expected_codes
-            if ok and monitor.keyword:
-                ok = monitor.keyword in resp.text
+            code_ok = resp.status_code in expected_codes
+            keyword_ok = (monitor.keyword in resp.text) if (code_ok and monitor.keyword) else True
+            ok = code_ok and keyword_ok
             if ok and monitor.max_response_ms and elapsed_ms > monitor.max_response_ms:
                 ok = False
                 msg = f"Response time {elapsed_ms} ms exceeded limit of {monitor.max_response_ms} ms"
+            elif ok:
+                msg = "OK"
+            elif not code_ok:
+                msg = f"HTTP {resp.status_code}"
             else:
-                msg = "OK" if ok else f"HTTP {resp.status_code}"
+                msg = f"Keyword \"{monitor.keyword}\" not found in response"
             status = "up" if ok else "down"
         except Exception as exc:
             elapsed_ms = int((time.monotonic() - start) * 1000)

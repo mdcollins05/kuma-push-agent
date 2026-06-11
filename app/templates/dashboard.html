@@ -51,6 +51,11 @@
           {% else %}
             <span class="badge badge-unknown">—</span>
           {% endif %}
+          {% if m.last_status == 'down' and m.last_error %}
+          <i class="bi bi-exclamation-circle-fill text-danger ms-1"
+             data-bs-toggle="tooltip" data-bs-placement="right"
+             title="{{ m.last_error }}"></i>
+          {% endif %}
         </td>
         <td class="fw-semibold">{{ m.name }}</td>
         <td class="text-muted small">
@@ -93,11 +98,6 @@
           </a>
         </td>
       </tr>
-      <tr id="error-row-{{ m.id }}" class="table-danger" {% if not (m.last_error and m.last_status == 'down') %}style="display:none"{% endif %}>
-        <td colspan="7" class="small py-1 ps-4 text-danger">
-          <i class="bi bi-exclamation-circle"></i> <span id="error-msg-{{ m.id }}">{{ m.last_error or '' }}</span>
-        </td>
-      </tr>
     {% endfor %}
     </tbody>
   </table>
@@ -114,6 +114,15 @@ function statusBadge(m) {
   return '<span class="badge badge-unknown">—</span>';
 }
 
+function escapeAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function errorIcon(m) {
+  if (m.last_status !== 'down' || !m.last_error) return '';
+  return ` <i class="bi bi-exclamation-circle-fill text-danger ms-1" data-bs-toggle="tooltip" data-bs-placement="right" title="${escapeAttr(m.last_error)}"></i>`;
+}
+
 function kumaBadge(m) {
   let base;
   if (m.kuma_synced && kumaConfigured) base = '<i class="bi bi-cloud-check text-success" title="Synced with Uptime Kuma"></i>';
@@ -128,6 +137,21 @@ function kumaBadge(m) {
   return base;
 }
 
+function initTooltips(scope) {
+  if (!window.bootstrap || !bootstrap.Tooltip) return;
+  scope.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    bootstrap.Tooltip.getOrCreateInstance(el);
+  });
+}
+
+function disposeTooltips(scope) {
+  if (!window.bootstrap || !bootstrap.Tooltip) return;
+  scope.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    const inst = bootstrap.Tooltip.getInstance(el);
+    if (inst) inst.dispose();
+  });
+}
+
 async function pollStatuses() {
   try {
     const resp = await fetch('/monitors/statuses');
@@ -137,22 +161,18 @@ async function pollStatuses() {
       const row = document.querySelector(`tr[data-monitor-id="${m.id}"]`);
       if (!row) continue;
       row.className = m.enabled ? '' : 'text-muted';
-      row.querySelector('[data-field="status"]').innerHTML = statusBadge(m);
+      const statusCell = row.querySelector('[data-field="status"]');
+      disposeTooltips(statusCell);
+      statusCell.innerHTML = statusBadge(m) + errorIcon(m);
+      initTooltips(statusCell);
       row.querySelector('[data-field="response"]').textContent = m.last_response_ms != null ? `${m.last_response_ms} ms` : '—';
       row.querySelector('[data-field="last-check"]').textContent = m.last_check_time ? m.last_check_time : 'Never';
       row.querySelector('[data-field="kuma-sync"]').innerHTML = kumaBadge(m);
-      const errorRow = document.getElementById(`error-row-${m.id}`);
-      const errorMsg = document.getElementById(`error-msg-${m.id}`);
-      if (m.last_error && m.last_status === 'down') {
-        errorMsg.textContent = m.last_error;
-        errorRow.style.display = '';
-      } else {
-        errorRow.style.display = 'none';
-      }
     }
   } catch (_) {}
 }
 
+document.addEventListener('DOMContentLoaded', () => initTooltips(document));
 setInterval(pollStatuses, 10000);
 </script>
 {% endblock %}
