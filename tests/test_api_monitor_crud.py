@@ -6,11 +6,23 @@ from app.models import Monitor
 from tests.conftest import HEADERS, TestingSessionLocal
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _payload(name: str, url: str = "https://example.com", *, interval: int = 60, **config_extra) -> dict:
+    """Build a v0.3.0-shape MonitorCreate payload."""
+    config = {"type": "http", "url": url, **config_extra}
+    return {"name": name, "interval": interval, "config": config}
+
+
+def _config_only(url: str = "https://example.com", **extra) -> dict:
+    return {"type": "http", "url": url, **extra}
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def monitor_id(client):
-    resp = client.post("/api/v1/monitors", json={"name": "Fixture Monitor", "url": "https://example.com"}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Fixture Monitor"), headers=HEADERS)
     assert resp.status_code == 201
     mid = resp.json()["id"]
     yield mid
@@ -20,7 +32,7 @@ def monitor_id(client):
 def _create_monitor_direct(name="Status Monitor", url="https://status.example.com") -> int:
     db = TestingSessionLocal()
     try:
-        m = Monitor(name=name, url=url, interval=60, enabled=True)
+        m = Monitor(name=name, interval=60, config=_config_only(url), enabled=True)
         db.add(m)
         db.commit()
         db.refresh(m)
@@ -51,11 +63,12 @@ def test_list_returns_200(client):
 # ── Create ────────────────────────────────────────────────────────────────────
 
 def test_create_returns_201(client):
-    resp = client.post("/api/v1/monitors", json={"name": "Create Test", "url": "https://create.example.com"}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Create Test", "https://create.example.com"), headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
     assert body["name"] == "Create Test"
-    assert body["url"] == "https://create.example.com"
+    assert body["config"]["url"] == "https://create.example.com"
+    assert body["config"]["type"] == "http"
     assert body["interval"] == 60
     assert body["enabled"] is True
     assert "id" in body
@@ -63,22 +76,58 @@ def test_create_returns_201(client):
 
 
 def test_create_with_all_fields(client):
-    payload = {
-        "name": "Full Monitor",
-        "url": "https://full.example.com",
-        "interval": 30,
-        "expected_codes": [200, 201],
-        "keyword": "healthy",
-        "verify_ssl": False,
-    }
+    payload = _payload(
+        "Full Monitor", "https://full.example.com", interval=30,
+        expected_codes=[200, 201], keyword="healthy", verify_ssl=False,
+    )
     resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
     assert body["interval"] == 30
-    assert body["expected_codes"] == [200, 201]
-    assert body["keyword"] == "healthy"
-    assert body["verify_ssl"] is False
+    assert body["config"]["expected_codes"] == [200, 201]
+    assert body["config"]["keyword"] == "healthy"
+    assert body["config"]["verify_ssl"] is False
     client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+
+
+def test_create_with_advanced_http_options(client):
+    """HTTP method, headers, and body round-trip through create + read."""
+    payload = _payload(
+        "POST Monitor", "https://post.example.com",
+        method="POST",
+        headers={"Authorization": "Bearer xyz", "Content-Type": "application/json"},
+        body='{"probe": true}',
+    )
+    resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
+    assert resp.status_code == 201
+    body = resp.json()
+    try:
+        assert body["config"]["method"] == "POST"
+        assert body["config"]["headers"] == {"Authorization": "Bearer xyz", "Content-Type": "application/json"}
+        assert body["config"]["body"] == '{"probe": true}'
+        # And confirm it round-trips through GET as well
+        get = client.get(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+        assert get.json()["config"]["method"] == "POST"
+    finally:
+        client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
+
+
+def test_create_rejects_unsupported_http_method(client):
+    payload = _payload("Bad Method", "https://m.example.com", method="TRACE")
+    resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
+    assert resp.status_code == 422
+
+
+def test_create_defaults_http_method_to_get(client):
+    resp = client.post("/api/v1/monitors", json=_payload("Default Method", "https://d.example.com"), headers=HEADERS)
+    assert resp.status_code == 201
+    body = resp.json()
+    try:
+        assert body["config"]["method"] == "GET"
+        assert body["config"]["headers"] == {}
+        assert body["config"]["body"] is None
+    finally:
+        client.delete(f"/api/v1/monitors/{body['id']}", headers=HEADERS)
 
 
 def test_create_missing_required_fields(client):
@@ -86,22 +135,24 @@ def test_create_missing_required_fields(client):
     assert resp.status_code == 422
 
 
+def test_create_missing_config_returns_422(client):
+    resp = client.post("/api/v1/monitors", json={"name": "No Config"}, headers=HEADERS)
+    assert resp.status_code == 422
+
+
 def test_create_interval_too_short(client):
-    resp = client.post("/api/v1/monitors", json={"name": "Fast", "url": "https://x.com", "interval": 10}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Fast", "https://x.com", interval=10) | {"interval": 10}, headers=HEADERS)
     assert resp.status_code == 422
 
 
 def test_create_invalid_status_code(client):
-    resp = client.post("/api/v1/monitors", json={"name": "Bad", "url": "https://x.com", "expected_codes": [999]}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Bad", "https://x.com", expected_codes=[999]), headers=HEADERS)
     assert resp.status_code == 422
 
 
 def test_create_persists_group_id(client):
-    resp = client.post("/api/v1/monitors", json={
-        "name": "Grouped Monitor",
-        "url": "https://grouped.example.com",
-        "kuma_group_id": 42,
-    }, headers=HEADERS)
+    payload = _payload("Grouped Monitor", "https://grouped.example.com") | {"kuma_group_id": 42}
+    resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
     try:
@@ -111,10 +162,7 @@ def test_create_persists_group_id(client):
 
 
 def test_create_without_group_returns_null(client):
-    resp = client.post("/api/v1/monitors", json={
-        "name": "Top-Level Monitor",
-        "url": "https://top.example.com",
-    }, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Top-Level Monitor", "https://top.example.com"), headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
     try:
@@ -124,29 +172,26 @@ def test_create_without_group_returns_null(client):
 
 
 def test_update_persists_group_id(client):
-    create = client.post("/api/v1/monitors", json={
-        "name": "Group Update Test",
-        "url": "https://groupupdate.example.com",
-    }, headers=HEADERS)
+    create = client.post("/api/v1/monitors", json=_payload("Group Update Test", "https://groupupdate.example.com"), headers=HEADERS)
     assert create.status_code == 201
     mid = create.json()["id"]
     try:
-        resp = client.put(f"/api/v1/monitors/{mid}", json={
-            "name": "Group Update Test",
-            "url": "https://groupupdate.example.com",
-            "kuma_group_id": 7,
-        }, headers=HEADERS)
+        resp = client.put(
+            f"/api/v1/monitors/{mid}",
+            json=_payload("Group Update Test", "https://groupupdate.example.com") | {"kuma_group_id": 7},
+            headers=HEADERS,
+        )
         assert resp.status_code == 200
         assert resp.json()["kuma_group_id"] == 7
 
         resp = client.get(f"/api/v1/monitors/{mid}", headers=HEADERS)
         assert resp.json()["kuma_group_id"] == 7
 
-        resp = client.put(f"/api/v1/monitors/{mid}", json={
-            "name": "Group Update Test",
-            "url": "https://groupupdate.example.com",
-            "kuma_group_id": None,
-        }, headers=HEADERS)
+        resp = client.put(
+            f"/api/v1/monitors/{mid}",
+            json=_payload("Group Update Test", "https://groupupdate.example.com") | {"kuma_group_id": None},
+            headers=HEADERS,
+        )
         assert resp.status_code == 200
         assert resp.json()["kuma_group_id"] is None
     finally:
@@ -154,12 +199,8 @@ def test_update_persists_group_id(client):
 
 
 def test_create_persists_tag_and_notification_ids(client):
-    resp = client.post("/api/v1/monitors", json={
-        "name": "Tagged Monitor",
-        "url": "https://tagged.example.com",
-        "tag_ids": [1, 2],
-        "notification_ids": [10],
-    }, headers=HEADERS)
+    payload = _payload("Tagged Monitor", "https://tagged.example.com") | {"tag_ids": [1, 2], "notification_ids": [10]}
+    resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
     assert resp.status_code == 201
     body = resp.json()
     try:
@@ -187,29 +228,42 @@ def test_get_not_found(client):
 def test_update_returns_updated_fields(client, monitor_id):
     resp = client.put(
         f"/api/v1/monitors/{monitor_id}",
-        json={"name": "Renamed", "url": "https://renamed.example.com", "interval": 120},
+        json=_payload("Renamed", "https://renamed.example.com", interval=120),
         headers=HEADERS,
     )
     assert resp.status_code == 200
     body = resp.json()
     assert body["name"] == "Renamed"
     assert body["interval"] == 120
+    assert body["config"]["url"] == "https://renamed.example.com"
+
+
+def test_update_advanced_http_options(client, monitor_id):
+    resp = client.put(
+        f"/api/v1/monitors/{monitor_id}",
+        json=_payload(
+            "Fixture Monitor", "https://example.com",
+            method="PUT", headers={"X-Test": "1"}, body="payload",
+        ),
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["config"]["method"] == "PUT"
+    assert body["config"]["headers"] == {"X-Test": "1"}
+    assert body["config"]["body"] == "payload"
 
 
 def test_update_persists_tag_and_notification_ids(client):
-    create = client.post("/api/v1/monitors", json={
-        "name": "Update Tag Test",
-        "url": "https://updatetag.example.com",
-    }, headers=HEADERS)
+    create = client.post("/api/v1/monitors", json=_payload("Update Tag Test", "https://updatetag.example.com"), headers=HEADERS)
     assert create.status_code == 201
     mid = create.json()["id"]
     try:
-        resp = client.put(f"/api/v1/monitors/{mid}", json={
-            "name": "Update Tag Test",
-            "url": "https://updatetag.example.com",
-            "tag_ids": [5],
-            "notification_ids": [20, 21],
-        }, headers=HEADERS)
+        resp = client.put(
+            f"/api/v1/monitors/{mid}",
+            json=_payload("Update Tag Test", "https://updatetag.example.com") | {"tag_ids": [5], "notification_ids": [20, 21]},
+            headers=HEADERS,
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["tag_ids"] == [5]
@@ -221,7 +275,7 @@ def test_update_persists_tag_and_notification_ids(client):
 def test_update_not_found(client):
     resp = client.put(
         "/api/v1/monitors/999999",
-        json={"name": "X", "url": "https://x.com"},
+        json=_payload("X", "https://x.com"),
         headers=HEADERS,
     )
     assert resp.status_code == 404
@@ -230,7 +284,7 @@ def test_update_not_found(client):
 # ── Delete ────────────────────────────────────────────────────────────────────
 
 def test_delete_returns_204(client):
-    resp = client.post("/api/v1/monitors", json={"name": "To Delete", "url": "https://del.example.com"}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("To Delete", "https://del.example.com"), headers=HEADERS)
     mid = resp.json()["id"]
     resp = client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
     assert resp.status_code == 204
@@ -242,7 +296,7 @@ def test_delete_not_found(client):
 
 
 def test_deleted_monitor_not_in_list(client):
-    resp = client.post("/api/v1/monitors", json={"name": "Temp", "url": "https://temp.example.com"}, headers=HEADERS)
+    resp = client.post("/api/v1/monitors", json=_payload("Temp", "https://temp.example.com"), headers=HEADERS)
     mid = resp.json()["id"]
     client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
     ids = [m["id"] for m in client.get("/api/v1/monitors", headers=HEADERS).json()]
@@ -266,7 +320,7 @@ def test_missing_api_key_returns_401(client):
 def status_monitor_id(client):
     resp = client.post(
         "/api/v1/monitors",
-        json={"name": "API Status Monitor", "url": "https://api-status.example.com"},
+        json=_payload("API Status Monitor", "https://api-status.example.com"),
         headers=HEADERS,
     )
     assert resp.status_code == 201

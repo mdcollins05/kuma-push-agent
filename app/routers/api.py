@@ -247,11 +247,8 @@ def get_monitor(monitor_id: int, db: Session = Depends(get_db)):
 def create_monitor(payload: MonitorCreate, db: Session = Depends(get_db)):
     monitor = Monitor(
         name=payload.name,
-        url=payload.url,
         interval=payload.interval,
-        expected_codes=payload.expected_codes,
-        keyword=payload.keyword,
-        verify_ssl=payload.verify_ssl,
+        config=payload.config.model_dump(),
         tag_ids=payload.tag_ids,
         notification_ids=payload.notification_ids,
         kuma_group_id=payload.kuma_group_id,
@@ -285,11 +282,8 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     group_changed = monitor.kuma_group_id != payload.kuma_group_id
 
     monitor.name = payload.name
-    monitor.url = payload.url
     monitor.interval = payload.interval
-    monitor.expected_codes = payload.expected_codes
-    monitor.keyword = payload.keyword
-    monitor.verify_ssl = payload.verify_ssl
+    monitor.config = payload.config.model_dump()
     monitor.tag_ids = list(new_tag_ids)
     monitor.notification_ids = payload.notification_ids
     monitor.kuma_group_id = payload.kuma_group_id
@@ -354,11 +348,8 @@ def _to_response(m: Monitor) -> MonitorResponse:
     return MonitorResponse(
         id=m.id,
         name=m.name,
-        url=m.url,
         interval=m.interval,
-        expected_codes=m.expected_codes or [200],
-        keyword=m.keyword,
-        verify_ssl=m.verify_ssl,
+        config=m.config or {"type": "http", "url": ""},
         tag_ids=m.tag_ids or [],
         notification_ids=m.notification_ids or [],
         kuma_group_id=m.kuma_group_id,

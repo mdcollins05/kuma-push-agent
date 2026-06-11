@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import List, Optional
 
@@ -17,12 +18,58 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/monitors")
 
+VALID_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
+
 
 def _parse_codes(raw: str) -> list[int]:
     try:
         return [int(c.strip()) for c in raw.split(",") if c.strip()]
     except ValueError:
         return [200]
+
+
+def _parse_headers(raw: str) -> tuple[dict | None, str | None]:
+    """Parse the headers textarea. Returns (headers_dict, error_msg). Empty input → ({}, None)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return {}, None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"Headers must be valid JSON: {exc.msg}"
+    if not isinstance(data, dict):
+        return None, "Headers must be a JSON object (e.g. {\"X-Header\": \"value\"})"
+    out = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            return None, "Headers JSON keys and values must both be strings"
+        out[k] = v
+    return out, None
+
+
+def _build_http_config(
+    url: str, method: str, headers_json: str, body: str,
+    expected_codes_raw: str, keyword: Optional[str], max_response_ms: Optional[int],
+    verify_ssl_flag: Optional[str],
+) -> tuple[dict | None, str | None]:
+    """Assemble the HTTP config dict from form fields. Returns (config, error_msg)."""
+    method = (method or "GET").upper()
+    if method not in VALID_HTTP_METHODS:
+        return None, f"Unsupported HTTP method: {method}"
+    headers, err = _parse_headers(headers_json)
+    if err:
+        return None, err
+    return {
+        "type": "http",
+        "url": url,
+        "method": method,
+        "headers": headers,
+        "body": body if body and body.strip() else None,
+        "expected_codes": _parse_codes(expected_codes_raw),
+        "keyword": keyword or None,
+        "max_response_ms": max_response_ms,
+        "verify_ssl": verify_ssl_flag is not None,
+    }, None
 
 
 def _kuma_creds(db: Session):
@@ -158,6 +205,9 @@ async def monitor_new_post(
     name: str = Form(...),
     url: str = Form(...),
     interval: int = Form(60),
+    method: str = Form("GET"),
+    headers_json: str = Form(""),
+    body: str = Form(""),
     expected_codes_raw: str = Form("200"),
     keyword: Optional[str] = Form(None),
     max_response_ms: Optional[int] = Form(None),
@@ -170,7 +220,6 @@ async def monitor_new_post(
     db: Session = Depends(get_db),
     user: str = Depends(require_auth),
 ):
-    expected_codes = _parse_codes(expected_codes_raw)
     kuma_url, kuma_user, kuma_pass = _kuma_creds(db)
 
     def _error(msg: str, status: int = 400):
@@ -180,12 +229,27 @@ async def monitor_new_post(
             {"monitor": None, "user": user, "error": msg,
              "notifications": _fetch_notifications(), "available_tags": available_tags,
              "groups": _fetch_groups(),
-             "kuma_configured": bool(kuma_url), "selected_tag_ids": tag_ids},
+             "kuma_configured": bool(kuma_url), "selected_tag_ids": tag_ids,
+             "form_values": {
+                 "name": name, "url": url, "interval": interval, "method": method,
+                 "headers_json": headers_json, "body": body,
+                 "expected_codes_raw": expected_codes_raw, "keyword": keyword,
+                 "max_response_ms": max_response_ms, "verify_ssl": verify_ssl is not None,
+                 "kuma_group_id": kuma_group_id,
+             }},
             status_code=status,
         )
 
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
+
+    config, err = _build_http_config(
+        url=url, method=method, headers_json=headers_json, body=body,
+        expected_codes_raw=expected_codes_raw, keyword=keyword,
+        max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
+    )
+    if err:
+        return _error(err)
 
     new_pairs = [(n.strip(), c) for n, c in zip(new_tag_names, new_tag_colors) if n.strip()]
     new_names = [n for n, _ in new_pairs]
@@ -193,15 +257,11 @@ async def monitor_new_post(
 
     monitor = Monitor(
         name=name,
-        url=url,
         interval=interval,
-        expected_codes=expected_codes,
-        keyword=keyword or None,
-        max_response_ms=max_response_ms,
+        config=config,
         notification_ids=notification_ids or [],
         tag_ids=tag_ids or [],
         kuma_group_id=kuma_group_id,
-        verify_ssl=verify_ssl is not None,
     )
     db.add(monitor)
     db.commit()
@@ -273,6 +333,9 @@ async def monitor_edit_post(
     name: str = Form(...),
     url: str = Form(...),
     interval: int = Form(60),
+    method: str = Form("GET"),
+    headers_json: str = Form(""),
+    body: str = Form(""),
     expected_codes_raw: str = Form("200"),
     keyword: Optional[str] = Form(None),
     max_response_ms: Optional[int] = Form(None),
@@ -301,12 +364,27 @@ async def monitor_edit_post(
              "available_tags": available_tags, "selected_tag_ids": tag_ids,
              "groups": _fetch_groups(),
              "pending_tasks": 0, "failed_tasks": 0,
-             "timezone": (cfg.timezone or "UTC") if cfg else "UTC"},
+             "timezone": (cfg.timezone or "UTC") if cfg else "UTC",
+             "form_values": {
+                 "name": name, "url": url, "interval": interval, "method": method,
+                 "headers_json": headers_json, "body": body,
+                 "expected_codes_raw": expected_codes_raw, "keyword": keyword,
+                 "max_response_ms": max_response_ms, "verify_ssl": verify_ssl is not None,
+                 "kuma_group_id": kuma_group_id,
+             }},
             status_code=status,
         )
 
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
+
+    config, err = _build_http_config(
+        url=url, method=method, headers_json=headers_json, body=body,
+        expected_codes_raw=expected_codes_raw, keyword=keyword,
+        max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
+    )
+    if err:
+        return _error(err)
 
     new_pairs = [(n.strip(), c) for n, c in zip(new_tag_names, new_tag_colors) if n.strip()]
     new_names = [n for n, _ in new_pairs]
@@ -322,15 +400,11 @@ async def monitor_edit_post(
     group_changed = monitor.kuma_group_id != kuma_group_id
 
     monitor.name = name
-    monitor.url = url
     monitor.interval = interval
-    monitor.expected_codes = _parse_codes(expected_codes_raw)
-    monitor.keyword = keyword or None
-    monitor.max_response_ms = max_response_ms
+    monitor.config = config
     monitor.notification_ids = notification_ids
     monitor.tag_ids = list(new_tag_ids)
     monitor.kuma_group_id = kuma_group_id
-    monitor.verify_ssl = verify_ssl is not None
     db.commit()
 
     if monitor.kuma_synced and monitor.kuma_monitor_id and (name_changed or interval_changed or notifications_changed or group_changed):

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,31 +30,84 @@ class TagCreate(BaseModel):
     }
 
 
+class HttpConfig(BaseModel):
+    """HTTP check configuration."""
+    type: Literal["http"] = Field("http", description="Check type discriminator")
+    url: str = Field(..., description="URL to health-check", examples=["https://api.example.com/health"])
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] = Field(
+        "GET", description="HTTP request method"
+    )
+    headers: Dict[str, str] = Field(
+        default_factory=dict, description="Custom request headers", examples=[{"Authorization": "Bearer xxx"}]
+    )
+    body: Optional[str] = Field(
+        None, description="Request body, sent as raw text — typically JSON when method is POST/PUT/PATCH"
+    )
+    expected_codes: List[int] = Field(
+        default_factory=lambda: [200], description="HTTP status codes considered healthy", examples=[[200]]
+    )
+    keyword: Optional[str] = Field(
+        None, description="Optional string that must appear in the response body"
+    )
+    max_response_ms: Optional[int] = Field(
+        None, description="Mark DOWN if response time exceeds this many milliseconds"
+    )
+    verify_ssl: bool = Field(True, description="Reject invalid or self-signed TLS certificates")
+
+    @field_validator("expected_codes")
+    @classmethod
+    def codes_valid(cls, v: List[int]) -> List[int]:
+        for c in v:
+            if not (100 <= c <= 599):
+                raise ValueError(f"invalid HTTP status code: {c}")
+        return v
+
+
+# Discriminated union of check configurations.
+# Future: Annotated[Union[HttpConfig, TcpConfig, DnsConfig, PingConfig], Field(discriminator="type")]
+CheckConfig = HttpConfig
+
+
 class MonitorCreate(BaseModel):
     name: str = Field(..., description="Human-readable monitor name, must be unique", examples=["My API"])
-    url: str = Field(..., description="URL to health-check", examples=["https://api.example.com/health"])
     interval: int = Field(60, description="Check interval in seconds (minimum 20)", examples=[60])
-    expected_codes: List[int] = Field([200], description="HTTP status codes considered healthy", examples=[[200]])
-    keyword: Optional[str] = Field(None, description="Optional string that must appear in the response body", examples=[None])
-    verify_ssl: bool = Field(True, description="Reject invalid or self-signed TLS certificates", examples=[True])
-    tag_ids: List[int] = Field([], description="Uptime Kuma tag IDs to apply to the monitor", examples=[[]])
-    notification_ids: List[int] = Field([], description="Uptime Kuma notification channel IDs to alert on status change", examples=[[]])
-    kuma_group_id: Optional[int] = Field(None, description="Uptime Kuma group monitor ID to nest this monitor under, or null for top level")
+    config: CheckConfig = Field(..., description="Check-type-specific configuration")
+    tag_ids: List[int] = Field(default_factory=list, description="Uptime Kuma tag IDs to apply to the monitor")
+    notification_ids: List[int] = Field(
+        default_factory=list, description="Uptime Kuma notification channel IDs to alert on status change"
+    )
+    kuma_group_id: Optional[int] = Field(
+        None, description="Uptime Kuma group monitor ID to nest this monitor under, or null for top level"
+    )
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
                     "name": "My API",
-                    "url": "https://api.example.com/health",
                     "interval": 60,
-                    "expected_codes": [200],
-                    "keyword": None,
-                    "verify_ssl": True,
+                    "config": {
+                        "type": "http",
+                        "url": "https://api.example.com/health",
+                        "method": "GET",
+                        "expected_codes": [200],
+                    },
                     "tag_ids": [],
                     "notification_ids": [],
                     "kuma_group_id": None,
-                }
+                },
+                {
+                    "name": "Auth POST probe",
+                    "interval": 60,
+                    "config": {
+                        "type": "http",
+                        "url": "https://api.example.com/auth",
+                        "method": "POST",
+                        "headers": {"Content-Type": "application/json"},
+                        "body": "{\"probe\": true}",
+                        "expected_codes": [200, 204],
+                    },
+                },
             ]
         }
     }
@@ -64,14 +117,6 @@ class MonitorCreate(BaseModel):
     def interval_min(cls, v: int) -> int:
         if v < 20:
             raise ValueError("interval must be at least 20 seconds")
-        return v
-
-    @field_validator("expected_codes")
-    @classmethod
-    def codes_valid(cls, v: List[int]) -> List[int]:
-        for c in v:
-            if not (100 <= c <= 599):
-                raise ValueError(f"invalid HTTP status code: {c}")
         return v
 
 
@@ -132,11 +177,8 @@ class MonitorStatus(BaseModel):
 class MonitorResponse(BaseModel):
     id: int = Field(..., description="Unique monitor ID")
     name: str = Field(..., description="Human-readable monitor name")
-    url: str = Field(..., description="URL being health-checked")
     interval: int = Field(..., description="Check interval in seconds")
-    expected_codes: List[int] = Field(..., description="HTTP status codes considered healthy")
-    keyword: Optional[str] = Field(None, description="String that must appear in the response body, or null")
-    verify_ssl: bool = Field(..., description="Whether SSL certificate validation is enabled")
+    config: CheckConfig = Field(..., description="Check-type-specific configuration")
     kuma_synced: bool = Field(..., description="Whether monitor has been successfully created in Uptime Kuma")
     last_status: Optional[str] = Field(None, description="'up' or 'down', null if never checked")
     last_check_time: Optional[str] = Field(None, description="ISO 8601 timestamp of the last check")
