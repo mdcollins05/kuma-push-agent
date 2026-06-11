@@ -255,6 +255,21 @@
     {% endif %}
     {% if kuma_configured %}
     <div class="card p-3 mb-3">
+      <h6 class="fw-semibold mb-2">Group</h6>
+      <select name="kuma_group_id" form="monitor-form" class="form-select form-select-sm">
+        <option value="">— None (top level) —</option>
+        {% for g in groups %}
+        <option value="{{ g.kuma_id }}"
+          {% if monitor and monitor.kuma_group_id == g.kuma_id %}selected{% endif %}>
+          {{ g.name }}
+        </option>
+        {% endfor %}
+      </select>
+      {% if not groups %}
+      <p class="text-muted small mb-0 mt-2">No groups found in Uptime Kuma.</p>
+      {% endif %}
+    </div>
+    <div class="card p-3 mb-3">
       <div class="d-flex align-items-center justify-content-between mb-2">
         <h6 class="fw-semibold mb-0">Tags</h6>
         <button type="button" id="refresh-tags-btn" class="btn btn-outline-secondary btn-sm py-0 px-2"

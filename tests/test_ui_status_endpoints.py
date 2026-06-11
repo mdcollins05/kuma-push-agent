@@ -111,7 +111,7 @@ def test_tasks_status_returns_expected_shape(client):
 
 # ── /tasks/system-status ──────────────────────────────────────────────────────
 
-SYSTEM_TASK_IDS = {"kuma_task_processor", "tag_cache_refresher", "notification_cache_refresher", "update_checker"}
+SYSTEM_TASK_IDS = {"kuma_task_processor", "tag_cache_refresher", "notification_cache_refresher", "group_cache_refresher", "update_checker"}
 SYSTEM_TASK_FIELDS = {"id", "label", "interval", "last_run", "last_error", "next_run"}
 
 
@@ -121,7 +121,7 @@ def test_system_status_returns_expected_shape(client):
     body = resp.json()
     assert "tasks" in body
     assert isinstance(body["tasks"], list)
-    assert len(body["tasks"]) == 4
+    assert len(body["tasks"]) == 5
     for task in body["tasks"]:
         assert SYSTEM_TASK_FIELDS == set(task.keys())
 

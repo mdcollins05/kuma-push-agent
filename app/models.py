@@ -21,6 +21,7 @@ class Monitor(Base):
     verify_ssl = Column(Boolean, default=True)
 
     kuma_monitor_id = Column(Integer, nullable=True)
+    kuma_group_id = Column(Integer, nullable=True)
     push_token = Column(String, nullable=True)
     kuma_synced = Column(Boolean, default=False)
 
@@ -37,7 +38,7 @@ class KumaTask(Base):
     __tablename__ = "kuma_tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    task_type = Column(String, nullable=False)       # update | pause | resume | delete
+    task_type = Column(String, nullable=False)       # update_monitor | pause_monitor | resume_monitor | delete_monitor | sync_monitor | update_tags | create_tags | create_tag
     monitor_id = Column(Integer, nullable=True)      # for querying per-monitor
     monitor_name = Column(String, nullable=True)     # cached for display
     payload = Column(JSON, nullable=False, default=dict)
@@ -60,6 +61,13 @@ class KumaNotification(Base):
     __tablename__ = "kuma_notifications"
 
     id = Column(Integer, primary_key=True)  # Kuma's notification ID, not autoincrement
+    name = Column(String, nullable=False)
+
+
+class KumaGroup(Base):
+    __tablename__ = "kuma_groups"
+
+    id = Column(Integer, primary_key=True)  # Kuma's monitor ID, not autoincrement
     name = Column(String, nullable=False)
 
 

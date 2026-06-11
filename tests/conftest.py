@@ -82,10 +82,14 @@ def reset_cache_module_state():
     """Reset in-memory cache module state before each test to prevent cross-test pollution."""
     import app.notification_cache as nc
     import app.tag_cache as tc
+    import app.group_cache as gc
     nc._cache = []
     nc._last_run = None
     nc._last_error = None
     tc._cache = []
     tc._last_run = None
     tc._last_error = None
+    gc._cache = []
+    gc._last_run = None
+    gc._last_error = None
     yield
