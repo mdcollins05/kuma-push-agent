@@ -1,4 +1,4 @@
-"""Tests for tag_cache and notification_cache — load_from_db, refresh, and refresh endpoints."""
+"""Tests for tag_cache, notification_cache, and group_cache — load_from_db, refresh, and refresh endpoints."""
 import pytest
 from unittest.mock import patch
 

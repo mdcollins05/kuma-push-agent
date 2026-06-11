@@ -38,7 +38,7 @@ class KumaTask(Base):
     __tablename__ = "kuma_tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    task_type = Column(String, nullable=False)       # update | pause | resume | delete
+    task_type = Column(String, nullable=False)       # update_monitor | pause_monitor | resume_monitor | delete_monitor | sync_monitor | update_tags | create_tags | create_tag
     monitor_id = Column(Integer, nullable=True)      # for querying per-monitor
     monitor_name = Column(String, nullable=True)     # cached for display
     payload = Column(JSON, nullable=False, default=dict)
