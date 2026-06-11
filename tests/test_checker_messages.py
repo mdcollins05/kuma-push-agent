@@ -16,15 +16,24 @@ def patch_session_local():
 
 
 def _make_monitor(**kw) -> int:
+    """Build a Monitor row from convenience kwargs that mirror the legacy
+    flat fields (url, keyword, etc.) — wrapped into a `config` dict for the
+    new schema."""
+    name = kw.pop("name", "T")
+    config = {
+        "type": "http",
+        "url": kw.pop("url", "https://x.test/"),
+        "method": "GET",
+        "headers": {},
+        "body": None,
+        "expected_codes": kw.pop("expected_codes", [200]),
+        "keyword": kw.pop("keyword", None),
+        "max_response_ms": kw.pop("max_response_ms", None),
+        "verify_ssl": kw.pop("verify_ssl", True),
+    }
     db = TestingSessionLocal()
     try:
-        m = Monitor(
-            name=kw.pop("name", "T"),
-            url=kw.pop("url", "https://x.test/"),
-            interval=60,
-            enabled=True,
-            **kw,
-        )
+        m = Monitor(name=name, interval=60, enabled=True, config=config, **kw)
         db.add(m)
         db.commit()
         db.refresh(m)

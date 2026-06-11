@@ -62,33 +62,42 @@
     <div class="card p-4 mb-3">
       <form id="monitor-form" method="post"
             action="{% if monitor %}/monitors/{{ monitor.id }}/edit{% else %}/monitors/new{% endif %}">
+        {% set cfg = monitor.config if monitor and monitor.config else {} %}
+        {% set fv = form_values if form_values is defined else {} %}
         <div class="mb-3">
           <label class="form-label fw-semibold">Name</label>
           <input type="text" name="name" class="form-control"
-                 value="{{ monitor.name if monitor else '' }}"
+                 value="{{ fv.get('name') if fv.get('name') else (monitor.name if monitor else '') }}"
                  placeholder="My Service" required>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">URL</label>
           <input type="url" name="url" class="form-control"
-                 value="{{ monitor.url if monitor else '' }}"
+                 value="{{ fv.get('url') if fv.get('url') else cfg.get('url', '') }}"
                  placeholder="https://example.com" required>
           <div class="form-check mt-2">
+            {% if fv %}
+              {% set verify_checked = fv.get('verify_ssl') %}
+            {% elif monitor %}
+              {% set verify_checked = cfg.get('verify_ssl', True) %}
+            {% else %}
+              {% set verify_checked = True %}
+            {% endif %}
             <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" value="true"
-              {{ 'checked' if (not monitor or monitor.verify_ssl) else '' }}>
+              {{ 'checked' if verify_checked else '' }}>
             <label class="form-check-label" for="verify_ssl">Verify SSL certificate</label>
           </div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Check Interval (seconds)</label>
           <input type="number" name="interval" class="form-control"
-                 value="{{ monitor.interval if monitor else 60 }}" min="20" required>
+                 value="{{ fv.get('interval') if fv.get('interval') else (monitor.interval if monitor else 60) }}" min="20" required>
           {% if not monitor %}<div class="form-text">Minimum 20 seconds.</div>{% endif %}
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Expected Status Codes</label>
           <input type="text" name="expected_codes_raw" class="form-control"
-            value="{{ (monitor.expected_codes or [200]) | join(', ') if monitor else '200' }}"
+            value="{{ fv.get('expected_codes_raw') if fv.get('expected_codes_raw') else ((cfg.get('expected_codes') or [200]) | join(', ') if monitor else '200') }}"
             placeholder="200, 201">
           {% if not monitor %}<div class="form-text">Comma-separated list of acceptable HTTP status codes.</div>{% endif %}
         </div>
@@ -96,7 +105,7 @@
           <label class="form-label fw-semibold">Max Response Time (optional)</label>
           <div class="input-group">
             <input type="number" name="max_response_ms" class="form-control"
-              value="{{ monitor.max_response_ms or '' if monitor else '' }}"
+              value="{{ fv.get('max_response_ms') if fv.get('max_response_ms') else (cfg.get('max_response_ms') or '' if monitor else '') }}"
               placeholder="e.g. 2000" min="1">
             <span class="input-group-text">ms</span>
           </div>
@@ -105,10 +114,54 @@
         <div class="mb-3">
           <label class="form-label fw-semibold">Keyword (optional)</label>
           <input type="text" name="keyword" class="form-control"
-                 value="{{ monitor.keyword or '' if monitor else '' }}"
+                 value="{{ fv.get('keyword') if fv.get('keyword') else (cfg.get('keyword') or '' if monitor else '') }}"
                  placeholder="ok">
           {% if not monitor %}<div class="form-text">Response body must contain this string to be considered UP.</div>{% endif %}
         </div>
+        {% set method_val = fv.get('method') or cfg.get('method', 'GET') %}
+        {% set headers_val = fv.get('headers_json') if fv.get('headers_json') else (cfg.get('headers') | tojson if cfg.get('headers') else '') %}
+        {% set body_val = fv.get('body') if fv.get('body') else (cfg.get('body') or '') %}
+        {% set advanced_open = method_val != 'GET' or headers_val or body_val %}
+        <div class="mb-3">
+          <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#advanced-http"
+                  aria-expanded="{{ 'true' if advanced_open else 'false' }}" aria-controls="advanced-http">
+            <i class="bi bi-chevron-{{ 'down' if advanced_open else 'right' }}" id="advanced-chevron"></i> Advanced HTTP options
+          </button>
+          <div class="collapse {{ 'show' if advanced_open else '' }}" id="advanced-http">
+            <div class="border rounded p-3 mt-2">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">HTTP Method</label>
+                <select name="method" class="form-select form-select-sm">
+                  {% for m in ['GET','POST','PUT','PATCH','DELETE','HEAD'] %}
+                  <option value="{{ m }}" {% if method_val == m %}selected{% endif %}>{{ m }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Request Headers (JSON object)</label>
+                <textarea name="headers_json" class="form-control font-monospace" rows="3"
+                          placeholder='{"Authorization": "Bearer xxx"}'>{{ headers_val }}</textarea>
+                <div class="form-text">Leave blank for none.</div>
+              </div>
+              <div class="mb-0">
+                <label class="form-label fw-semibold">Request Body</label>
+                <textarea name="body" class="form-control font-monospace" rows="4"
+                          placeholder='{"probe": true}'>{{ body_val }}</textarea>
+                <div class="form-text">Sent as raw text — set <code>Content-Type</code> in headers if needed.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+        (function() {
+          var coll = document.getElementById('advanced-http');
+          var chev = document.getElementById('advanced-chevron');
+          if (!coll || !chev) return;
+          coll.addEventListener('show.bs.collapse', function() { chev.classList.remove('bi-chevron-right'); chev.classList.add('bi-chevron-down'); });
+          coll.addEventListener('hide.bs.collapse', function() { chev.classList.remove('bi-chevron-down'); chev.classList.add('bi-chevron-right'); });
+        })();
+        </script>
         <button type="submit" class="btn btn-primary">
           {% if monitor %}Save Changes{% else %}Create Monitor{% endif %}
         </button>

@@ -7,6 +7,38 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _check_http(config: dict) -> tuple[str, str, int]:
+    """Run an HTTP check and return (status, message, elapsed_ms)."""
+    url = config.get("url") or ""
+    method = (config.get("method") or "GET").upper()
+    headers = config.get("headers") or None
+    body = config.get("body")
+    verify = config.get("verify_ssl", True)
+    expected_codes = config.get("expected_codes") or [200]
+    keyword = config.get("keyword")
+    max_response_ms = config.get("max_response_ms")
+
+    start = time.monotonic()
+    try:
+        with httpx.Client(verify=verify, timeout=10.0, follow_redirects=True) as client:
+            resp = client.request(method, url, headers=headers, content=body if body else None)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        code_ok = resp.status_code in expected_codes
+        keyword_ok = (keyword in resp.text) if (code_ok and keyword) else True
+        ok = code_ok and keyword_ok
+        if ok and max_response_ms and elapsed_ms > max_response_ms:
+            return "down", f"Response time {elapsed_ms} ms exceeded limit of {max_response_ms} ms", elapsed_ms
+        if ok:
+            return "up", "OK", elapsed_ms
+        if not code_ok:
+            return "down", f"HTTP {resp.status_code}", elapsed_ms
+        return "down", f"Keyword \"{keyword}\" not found in response", elapsed_ms
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return "down", str(exc)[:200], elapsed_ms
+
+
 def run_check(monitor_id: int) -> None:
     """Health-check one monitor and push the result to Kuma. Runs in a thread pool."""
     from .database import SessionLocal
@@ -21,34 +53,13 @@ def run_check(monitor_id: int) -> None:
             logger.info("run_check skip: monitor_id=%d not found or disabled", monitor_id)
             return
 
-        expected_codes = monitor.expected_codes or [200]
-        start = time.monotonic()
-        status = "down"
-        msg = "Unknown error"
-        elapsed_ms = 0
+        config = monitor.config or {}
+        check_type = config.get("type", "http")
 
-        try:
-            with httpx.Client(verify=monitor.verify_ssl, timeout=10.0, follow_redirects=True) as client:
-                resp = client.get(monitor.url)
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-
-            code_ok = resp.status_code in expected_codes
-            keyword_ok = (monitor.keyword in resp.text) if (code_ok and monitor.keyword) else True
-            ok = code_ok and keyword_ok
-            if ok and monitor.max_response_ms and elapsed_ms > monitor.max_response_ms:
-                ok = False
-                msg = f"Response time {elapsed_ms} ms exceeded limit of {monitor.max_response_ms} ms"
-            elif ok:
-                msg = "OK"
-            elif not code_ok:
-                msg = f"HTTP {resp.status_code}"
-            else:
-                msg = f"Keyword \"{monitor.keyword}\" not found in response"
-            status = "up" if ok else "down"
-        except Exception as exc:
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            status = "down"
-            msg = str(exc)[:200]
+        if check_type == "http":
+            status, msg, elapsed_ms = _check_http(config)
+        else:
+            status, msg, elapsed_ms = "down", f"Unsupported check type: {check_type}", 0
 
         monitor.last_status = status
         monitor.last_check_time = datetime.now(timezone.utc).replace(tzinfo=None)

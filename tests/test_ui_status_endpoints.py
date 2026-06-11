@@ -12,7 +12,7 @@ from tests.conftest import HEADERS, TestingSessionLocal
 def _create_monitor(name="Status Monitor", url="https://status.example.com") -> int:
     db = TestingSessionLocal()
     try:
-        m = Monitor(name=name, url=url, interval=60, enabled=True)
+        m = Monitor(name=name, interval=60, enabled=True, config={"type": "http", "url": url})
         db.add(m)
         db.commit()
         db.refresh(m)

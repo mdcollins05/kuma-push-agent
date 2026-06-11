@@ -59,9 +59,12 @@
         </td>
         <td class="fw-semibold">{{ m.name }}</td>
         <td class="text-muted small">
-          <a href="{{ m.url }}" target="_blank" rel="noopener" class="text-muted text-decoration-none">
-            {{ m.url }}
+          {% set cfg_url = (m.config or {}).get('url', '') %}
+          {% if cfg_url %}
+          <a href="{{ cfg_url }}" target="_blank" rel="noopener" class="text-muted text-decoration-none">
+            {{ cfg_url }}
           </a>
+          {% else %}—{% endif %}
         </td>
         <td class="small" data-field="response">
           {% if m.last_response_ms is not none %}
