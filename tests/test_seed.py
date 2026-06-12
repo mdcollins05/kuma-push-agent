@@ -110,3 +110,16 @@ def test_non_positive_max_response_ms_is_skipped(tmp_path):
     """)
     monitors = _seed(seed_file)
     assert monitors == []
+
+
+def test_non_mapping_entries_are_skipped(tmp_path):
+    """Scalar/list entries under monitors: must not crash startup."""
+    seed_file = _write(tmp_path, """
+        monitors:
+          - just a string
+          - [list, not, dict]
+          - name: Good One
+            url: https://good.test
+    """)
+    monitors = _seed(seed_file)
+    assert [m.name for m in monitors] == ["Good One"]

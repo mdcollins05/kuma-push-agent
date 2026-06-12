@@ -28,6 +28,12 @@ def seed_from_yaml(db, seed_file: str) -> None:
     monitors = data.get("monitors") or []
     seeded = 0
     for entry in monitors:
+        if not isinstance(entry, dict):
+            logger.warning(
+                "Skipping invalid seed entry %r: monitor entries must be mappings",
+                entry,
+            )
+            continue
         raw_config = entry.get("config")
         if not isinstance(raw_config, dict):
             # Build from flat YAML keys (pre-v0.3.0 format).
