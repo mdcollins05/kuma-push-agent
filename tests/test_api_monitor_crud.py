@@ -423,6 +423,54 @@ def test_recreate_kuma_clears_sync_state(client):
         _delete_monitor_direct(mid)
 
 
+def test_recreate_kuma_cancels_pending_tasks(client):
+    """Recreate cancels queued KumaTasks so they don't retry against the stale kuma_monitor_id."""
+    from app.models import KumaTask
+
+    db = TestingSessionLocal()
+    try:
+        m = Monitor(
+            name="Recreate Cancel", interval=60,
+            config=_config_only("https://cancel.example.com"),
+            kuma_monitor_id=77, push_token="t", kuma_synced=True, enabled=True,
+        )
+        db.add(m)
+        db.commit()
+        mid = m.id
+        for status in ("pending", "failed"):
+            db.add(KumaTask(
+                task_type="update_monitor", monitor_id=mid, monitor_name="Recreate Cancel",
+                payload={"kuma_monitor_id": 77, "fields": {}}, status=status,
+            ))
+        # An unrelated "done" task should NOT be cancelled.
+        db.add(KumaTask(
+            task_type="update_monitor", monitor_id=mid, monitor_name="Recreate Cancel",
+            payload={"kuma_monitor_id": 77, "fields": {}}, status="done",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+
+        db = TestingSessionLocal()
+        try:
+            statuses = sorted(s for (s,) in db.query(KumaTask.status).filter(KumaTask.monitor_id == mid).all())
+            assert statuses == ["cancelled", "cancelled", "done"]
+        finally:
+            db.close()
+    finally:
+        db = TestingSessionLocal()
+        try:
+            db.query(KumaTask).filter(KumaTask.monitor_id == mid).delete()
+            db.commit()
+        finally:
+            db.close()
+        _delete_monitor_direct(mid)
+
+
 def test_recreate_kuma_returns_404_for_missing_monitor(client):
     resp = client.post("/api/v1/monitors/999999/recreate-kuma", headers=HEADERS)
     assert resp.status_code == 404

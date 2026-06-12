@@ -345,6 +345,10 @@ def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
             status_code=409,
             detail="Monitor has never been synced with Uptime Kuma — nothing to recreate",
         )
+    # Drop queued tasks that target the now-dead kuma_monitor_id — otherwise
+    # they'd keep retrying against a stale ID after the fresh provision lands.
+    from ..kuma_queue import cancel_monitor_tasks
+    cancel_monitor_tasks(db, monitor_id)
     monitor.kuma_monitor_id = None
     monitor.push_token = None
     monitor.kuma_synced = False
