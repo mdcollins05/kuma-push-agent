@@ -27,7 +27,7 @@ def _check_http(config: dict) -> tuple[str, str, int]:
         code_ok = resp.status_code in expected_codes
         keyword_ok = (keyword in resp.text) if (code_ok and keyword) else True
         ok = code_ok and keyword_ok
-        if ok and max_response_ms and elapsed_ms > max_response_ms:
+        if ok and max_response_ms is not None and elapsed_ms > max_response_ms:
             return "down", f"Response time {elapsed_ms} ms exceeded limit of {max_response_ms} ms", elapsed_ms
         if ok:
             return "up", "OK", elapsed_ms

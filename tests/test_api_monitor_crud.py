@@ -150,6 +150,31 @@ def test_create_invalid_status_code(client):
     assert resp.status_code == 422
 
 
+def test_create_rejects_blank_url(client):
+    resp = client.post("/api/v1/monitors", json=_payload("Blank URL", ""), headers=HEADERS)
+    assert resp.status_code == 422
+
+
+def test_create_rejects_whitespace_url(client):
+    resp = client.post("/api/v1/monitors", json=_payload("Whitespace URL", "   "), headers=HEADERS)
+    assert resp.status_code == 422
+
+
+def test_create_rejects_empty_expected_codes(client):
+    resp = client.post("/api/v1/monitors", json=_payload("Empty Codes", "https://x.com", expected_codes=[]), headers=HEADERS)
+    assert resp.status_code == 422
+
+
+def test_create_rejects_non_positive_max_response_ms(client):
+    for bad in (0, -1):
+        resp = client.post(
+            "/api/v1/monitors",
+            json=_payload(f"Bad MRT {bad}", "https://x.com", max_response_ms=bad),
+            headers=HEADERS,
+        )
+        assert resp.status_code == 422, f"expected 422 for max_response_ms={bad}"
+
+
 def test_create_persists_group_id(client):
     payload = _payload("Grouped Monitor", "https://grouped.example.com") | {"kuma_group_id": 42}
     resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
