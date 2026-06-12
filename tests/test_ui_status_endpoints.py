@@ -47,7 +47,7 @@ def test_monitor_statuses_contains_expected_fields(client):
         assert resp.status_code == 200
         monitor = next((m for m in resp.json() if m["id"] == mid), None)
         assert monitor is not None
-        for field in ("id", "last_status", "last_check_time", "last_response_ms", "kuma_synced", "pending_tasks", "failed_tasks"):
+        for field in ("id", "last_status", "last_check_time", "last_response_ms", "kuma_synced", "kuma_missing", "pending_tasks", "failed_tasks"):
             assert field in monitor, f"missing field: {field}"
     finally:
         _delete_monitor(mid)

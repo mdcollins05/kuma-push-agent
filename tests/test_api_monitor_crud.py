@@ -367,7 +367,7 @@ def test_api_monitor_statuses_has_expected_fields(client, status_monitor_id):
     assert monitor is not None
     for field in (
         "id", "enabled", "last_status", "last_check_time",
-        "last_response_ms", "kuma_synced", "kuma_monitor_id",
+        "last_response_ms", "kuma_synced", "kuma_monitor_id", "kuma_missing",
         "pending_jobs", "failed_jobs", "pending_create_tags",
     ):
         assert field in monitor, f"missing field: {field}"
@@ -382,3 +382,133 @@ def test_api_monitor_status_returns_correct_id(client, status_monitor_id):
 def test_api_monitor_status_not_found(client):
     resp = client.get("/api/v1/monitors/999999/status", headers=HEADERS)
     assert resp.status_code == 404
+
+
+# ── Recreate Kuma monitor ─────────────────────────────────────────────────────
+
+def test_recreate_kuma_clears_sync_state(client):
+    """Recreate clears kuma_monitor_id/push_token/kuma_synced/kuma_missing on a previously synced monitor."""
+    db = TestingSessionLocal()
+    try:
+        m = Monitor(
+            name="Recreate Target", interval=60,
+            config=_config_only("https://recreate.example.com"),
+            kuma_monitor_id=42, push_token="oldtoken",
+            kuma_synced=True, kuma_missing=True, enabled=True,
+        )
+        db.add(m)
+        db.commit()
+        mid = m.id
+    finally:
+        db.close()
+
+    try:
+        resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["id"] == mid
+        assert body["kuma_synced"] is False
+        assert body["kuma_missing"] is False
+
+        db = TestingSessionLocal()
+        try:
+            row = db.get(Monitor, mid)
+            assert row.kuma_monitor_id is None
+            assert row.push_token is None
+            assert row.kuma_synced is False
+            assert row.kuma_missing is False
+        finally:
+            db.close()
+    finally:
+        _delete_monitor_direct(mid)
+
+
+def test_recreate_kuma_cancels_pending_tasks(client):
+    """Recreate cancels queued KumaTasks so they don't retry against the stale kuma_monitor_id."""
+    from app.models import KumaTask
+
+    db = TestingSessionLocal()
+    try:
+        m = Monitor(
+            name="Recreate Cancel", interval=60,
+            config=_config_only("https://cancel.example.com"),
+            kuma_monitor_id=77, push_token="t", kuma_synced=True, enabled=True,
+        )
+        db.add(m)
+        db.commit()
+        mid = m.id
+        for status in ("pending", "failed"):
+            db.add(KumaTask(
+                task_type="update_monitor", monitor_id=mid, monitor_name="Recreate Cancel",
+                payload={"kuma_monitor_id": 77, "fields": {}}, status=status,
+            ))
+        # An unrelated "done" task should NOT be cancelled.
+        db.add(KumaTask(
+            task_type="update_monitor", monitor_id=mid, monitor_name="Recreate Cancel",
+            payload={"kuma_monitor_id": 77, "fields": {}}, status="done",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+
+        db = TestingSessionLocal()
+        try:
+            statuses = sorted(s for (s,) in db.query(KumaTask.status).filter(KumaTask.monitor_id == mid).all())
+            assert statuses == ["cancelled", "cancelled", "done"]
+        finally:
+            db.close()
+    finally:
+        db = TestingSessionLocal()
+        try:
+            db.query(KumaTask).filter(KumaTask.monitor_id == mid).delete()
+            db.commit()
+        finally:
+            db.close()
+        _delete_monitor_direct(mid)
+
+
+def test_recreate_kuma_returns_404_for_missing_monitor(client):
+    resp = client.post("/api/v1/monitors/999999/recreate-kuma", headers=HEADERS)
+    assert resp.status_code == 404
+
+
+def test_recreate_kuma_returns_409_when_never_synced(client):
+    db = TestingSessionLocal()
+    try:
+        m = Monitor(
+            name="Never Synced", interval=60,
+            config=_config_only("https://never.example.com"),
+            kuma_synced=False, enabled=True,
+        )
+        db.add(m)
+        db.commit()
+        mid = m.id
+    finally:
+        db.close()
+
+    try:
+        resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
+        assert resp.status_code == 409
+    finally:
+        _delete_monitor_direct(mid)
+
+
+def test_monitor_response_includes_kuma_missing(client):
+    """MonitorResponse exposes kuma_missing on create/get."""
+    resp = client.post(
+        "/api/v1/monitors",
+        json=_payload("KM Field", "https://km.example.com"),
+        headers=HEADERS,
+    )
+    assert resp.status_code == 201
+    mid = resp.json()["id"]
+    try:
+        assert resp.json()["kuma_missing"] is False
+        got = client.get(f"/api/v1/monitors/{mid}", headers=HEADERS)
+        assert got.json()["kuma_missing"] is False
+    finally:
+        client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)

@@ -94,6 +94,10 @@
           {% elif jc.get('pending', 0) > 0 %}
             <i class="bi bi-arrow-repeat text-warning ms-1" title="Sync task pending"></i>
           {% endif %}
+          {% if m.kuma_missing %}
+            <i class="bi bi-exclamation-octagon-fill text-danger ms-1"
+               title="Kuma monitor missing — push returning 404. Open the monitor to recreate."></i>
+          {% endif %}
         </td>
         <td class="text-end">
           <a href="/monitors/{{ m.id }}/edit" class="btn btn-sm btn-outline-secondary">
@@ -137,6 +141,8 @@ function kumaBadge(m) {
     base += ' <i class="bi bi-exclamation-triangle text-danger ms-1" title="Sync task failed — settings may be out of date"></i>';
   else if ((m.pending_tasks || 0) > 0)
     base += ' <i class="bi bi-arrow-repeat text-warning ms-1" title="Sync task pending"></i>';
+  if (m.kuma_missing)
+    base += ' <i class="bi bi-exclamation-octagon-fill text-danger ms-1" title="Kuma monitor missing — push returning 404. Open the monitor to recreate."></i>';
   return base;
 }
 
