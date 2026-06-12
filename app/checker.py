@@ -128,7 +128,22 @@ def run_check(monitor_id: int) -> None:
                     ping_ms=elapsed_ms,
                 )
                 with httpx.Client(timeout=5.0) as client:
-                    client.get(push_url)
+                    resp = client.get(push_url)
+                if resp.status_code == 404:
+                    if not monitor.kuma_missing:
+                        logger.warning(
+                            "Kuma monitor missing (push 404) for monitor %d kuma_monitor_id=%s — recreate required",
+                            monitor_id, monitor.kuma_monitor_id,
+                        )
+                        monitor.kuma_missing = True
+                        db.commit()
+                elif resp.status_code < 400 and monitor.kuma_missing:
+                    logger.info(
+                        "Kuma monitor recovered for monitor %d — clearing missing flag",
+                        monitor_id,
+                    )
+                    monitor.kuma_missing = False
+                    db.commit()
             except Exception as exc:
                 logger.warning("Kuma push failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
     finally:

@@ -183,6 +183,13 @@ class MonitorStatus(BaseModel):
     last_error: Optional[str] = Field(None, description="Error message from the most recent failed check")
     kuma_synced: bool = Field(..., description="Whether monitor exists in Uptime Kuma")
     kuma_monitor_id: Optional[int] = Field(None, description="Uptime Kuma monitor ID, null if not synced")
+    kuma_missing: bool = Field(
+        ...,
+        description=(
+            "True when the most recent push returned HTTP 404 — the Kuma monitor has been "
+            "deleted server-side and must be recreated via `POST /api/v1/monitors/{id}/recreate-kuma`."
+        ),
+    )
     pending_jobs: int = Field(..., description="Number of pending Uptime Kuma sync jobs")
     failed_jobs: int = Field(..., description="Number of failed Uptime Kuma sync jobs")
     pending_create_tags: bool = Field(..., description="Whether a tag-creation job is pending")
@@ -196,6 +203,13 @@ class MonitorResponse(BaseModel):
     interval: int = Field(..., description="Check interval in seconds")
     config: CheckConfig = Field(..., description="Check-type-specific configuration")
     kuma_synced: bool = Field(..., description="Whether monitor has been successfully created in Uptime Kuma")
+    kuma_missing: bool = Field(
+        False,
+        description=(
+            "True when the most recent push returned HTTP 404 — the Kuma monitor has been "
+            "deleted server-side and must be recreated via `POST /api/v1/monitors/{id}/recreate-kuma`."
+        ),
+    )
     last_status: Optional[str] = Field(None, description="'up' or 'down', null if never checked")
     last_check_time: Optional[str] = Field(None, description="ISO 8601 timestamp of the last check")
     last_response_ms: Optional[int] = Field(None, description="Response time in milliseconds")

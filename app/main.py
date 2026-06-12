@@ -136,6 +136,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
             "ALTER TABLE monitors ADD COLUMN kuma_group_id INTEGER",
             "ALTER TABLE monitors ADD COLUMN config TEXT",
+            "ALTER TABLE monitors ADD COLUMN kuma_missing BOOLEAN DEFAULT 0",
             """CREATE TABLE IF NOT EXISTS kuma_tags (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,

@@ -34,6 +34,7 @@ def monitor_status_dict(m: Monitor, db: Session = None, tz: str = "UTC") -> dict
         "last_error": m.last_error,
         "kuma_synced": m.kuma_synced,
         "kuma_monitor_id": m.kuma_monitor_id,
+        "kuma_missing": bool(m.kuma_missing),
         "pending_jobs": pending_jobs,
         "failed_jobs": failed_jobs,
         "pending_create_tags": pending_create_tags,

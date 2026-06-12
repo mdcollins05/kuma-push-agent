@@ -20,6 +20,9 @@ class Monitor(Base):
     kuma_group_id = Column(Integer, nullable=True)
     push_token = Column(String, nullable=True)
     kuma_synced = Column(Boolean, default=False)
+    # Push GET returned 404 → Kuma monitor was deleted server-side. Cleared on push 200
+    # or via the manual "Recreate" action which also resets kuma_synced for re-provisioning.
+    kuma_missing = Column(Boolean, default=False)
 
     last_status = Column(String, nullable=True)
     last_check_time = Column(DateTime, nullable=True)

@@ -319,6 +319,41 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     return _to_response(monitor)
 
 
+@router.post(
+    "/monitors/{monitor_id}/recreate-kuma",
+    response_model=MonitorResponse,
+    tags=["Monitors"],
+    summary="Recreate the Uptime Kuma monitor",
+    description=(
+        "Recovers from a Kuma monitor that was deleted server-side (push returning 404). "
+        "Clears the cached `kuma_monitor_id` / `push_token` and resets `kuma_synced` so the "
+        "next check cycle (within ~`interval` seconds) creates a fresh Kuma monitor and "
+        "fetches a new push token. The old Kuma monitor ID is discarded without contacting "
+        "Kuma — call this only when the monitor is genuinely missing on Kuma."
+    ),
+    responses={
+        **_404,
+        409: {"description": "Monitor has never been synced — nothing to recreate"},
+    },
+)
+def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
+    monitor = db.get(Monitor, monitor_id)
+    if not monitor:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    if not monitor.kuma_monitor_id and not monitor.kuma_synced:
+        raise HTTPException(
+            status_code=409,
+            detail="Monitor has never been synced with Uptime Kuma — nothing to recreate",
+        )
+    monitor.kuma_monitor_id = None
+    monitor.push_token = None
+    monitor.kuma_synced = False
+    monitor.kuma_missing = False
+    db.commit()
+    db.refresh(monitor)
+    return _to_response(monitor)
+
+
 @router.delete(
     "/monitors/{monitor_id}",
     status_code=204,
@@ -354,6 +389,7 @@ def _to_response(m: Monitor) -> MonitorResponse:
         notification_ids=m.notification_ids or [],
         kuma_group_id=m.kuma_group_id,
         kuma_synced=m.kuma_synced,
+        kuma_missing=bool(m.kuma_missing),
         last_status=m.last_status,
         last_check_time=m.last_check_time.isoformat() if m.last_check_time else None,
         last_response_ms=m.last_response_ms,

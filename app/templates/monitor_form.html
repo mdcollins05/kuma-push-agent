@@ -33,6 +33,19 @@
 {% endif %}
 
 {% if monitor %}
+<div id="kuma-missing-warning"
+     class="alert alert-danger py-2 d-flex align-items-center gap-2 mb-3"
+     {% if not monitor.kuma_missing %}style="display:none!important"{% endif %}>
+  <i class="bi bi-exclamation-octagon-fill"></i>
+  <span>
+    Uptime Kuma monitor is missing — pushes are returning 404. The monitor was likely deleted on the Kuma server.
+  </span>
+  <form method="post" action="/monitors/{{ monitor.id }}/recreate-kuma" class="ms-auto">
+    <button type="submit" class="btn btn-sm btn-danger">
+      <i class="bi bi-arrow-clockwise"></i> Recreate in Uptime Kuma
+    </button>
+  </form>
+</div>
 <div id="sync-warning"
      class="alert {% if failed_tasks > 0 %}alert-danger{% else %}alert-warning{% endif %} py-2 d-flex align-items-center gap-2 mb-3"
      {% if pending_tasks == 0 and failed_tasks == 0 %}style="display:none!important"{% endif %}>
@@ -514,6 +527,13 @@ function renderSyncWarning(m) {
 
 let _hadPendingCreateTags = {{ 'true' if pending_new_tags else 'false' }};
 
+function renderMissingWarning(m) {
+  const banner = document.getElementById('kuma-missing-warning');
+  if (!banner) return;
+  if (m.kuma_missing) banner.style.removeProperty('display');
+  else banner.style.setProperty('display', 'none', 'important');
+}
+
 async function pollStatus() {
   try {
     const resp = await fetch(`/monitors/${monitorId}/status`);
@@ -522,6 +542,7 @@ async function pollStatus() {
     renderStatusCard(m);
     renderKumaSync(m);
     renderSyncWarning(m);
+    renderMissingWarning(m);
     if (_hadPendingCreateTags && !m.pending_create_tags) {
       location.reload();
       return;

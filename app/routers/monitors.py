@@ -470,6 +470,22 @@ async def monitor_resync(
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
 
+@router.post("/{monitor_id}/recreate-kuma")
+async def monitor_recreate_kuma(
+    monitor_id: int,
+    db: Session = Depends(get_db),
+    user: str = Depends(require_auth),
+):
+    monitor = db.get(Monitor, monitor_id)
+    if monitor and (monitor.kuma_monitor_id or monitor.kuma_synced):
+        monitor.kuma_monitor_id = None
+        monitor.push_token = None
+        monitor.kuma_synced = False
+        monitor.kuma_missing = False
+        db.commit()
+    return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
+
+
 @router.post("/{monitor_id}/orphan")
 async def monitor_orphan(
     monitor_id: int,
