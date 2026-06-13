@@ -85,3 +85,4 @@ class AppSettings(Base):
     api_key = Column(String, nullable=True)
     timezone = Column(String, nullable=True, default="UTC")
     last_update_check = Column(DateTime, nullable=True)
+    latest_version = Column(String, nullable=True)

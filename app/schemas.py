@@ -174,6 +174,30 @@ class KumaSettingsResponse(BaseModel):
     kuma_username: Optional[str] = Field(None, description="Configured Kuma username")
 
 
+class UpdateInfoResponse(BaseModel):
+    current_version: str = Field(..., description="Running application version", examples=["0.3.0"])
+    latest_version: Optional[str] = Field(
+        None,
+        description=(
+            "Latest GitHub release version (without leading 'v'), or null if no check has "
+            "succeeded yet — e.g. on fresh installs or when running a `dev` build."
+        ),
+        examples=["0.3.0"],
+    )
+    update_available: bool = Field(
+        ...,
+        description="True when `latest_version` is strictly newer than `current_version`.",
+    )
+    last_check: Optional[str] = Field(
+        None,
+        description="ISO 8601 timestamp of the last GitHub API check, or null if none has run.",
+    )
+    release_url: Optional[str] = Field(
+        None,
+        description="URL of the latest GitHub release, populated only when `update_available` is true.",
+    )
+
+
 class MonitorStatus(BaseModel):
     id: int = Field(..., description="Unique monitor ID")
     enabled: bool = Field(..., description="Whether the check scheduler is active")

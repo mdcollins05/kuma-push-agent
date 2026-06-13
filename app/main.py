@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE kuma_tasks ADD COLUMN next_retry_at DATETIME",
             "ALTER TABLE app_settings ADD COLUMN timezone TEXT DEFAULT 'UTC'",
             "ALTER TABLE app_settings ADD COLUMN last_update_check DATETIME",
+            "ALTER TABLE app_settings ADD COLUMN latest_version TEXT",
             "ALTER TABLE monitors ADD COLUMN tag_ids TEXT",
             "ALTER TABLE monitors ADD COLUMN kuma_group_id INTEGER",
             "ALTER TABLE monitors ADD COLUMN config TEXT",
@@ -192,6 +193,9 @@ async def lifespan(app: FastAPI):
     from .group_cache import load_from_db as _load_groups_from_db
     _load_groups_from_db()
 
+    from .update_cache import load_from_db as _load_update_from_db
+    _load_update_from_db()
+
     start_kuma_task_processor()
     start_notification_cache_refresher()
     start_tag_cache_refresher()
@@ -223,6 +227,7 @@ app = FastAPI(
         {"name": "Notifications", "description": "View Uptime Kuma notification channels."},
         {"name": "Groups", "description": "View Uptime Kuma group monitors."},
         {"name": "Monitors", "description": "Create, read, update, and delete health-check monitors."},
+        {"name": "System", "description": "Application metadata — version, update availability."},
     ],
     swagger_ui_parameters={"persistAuthorization": True},
     lifespan=lifespan,

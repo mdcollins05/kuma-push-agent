@@ -44,6 +44,33 @@ def status() -> dict:
         return {"last_run": _last_run, "last_error": _last_error}
 
 
+def load_from_db() -> None:
+    """Restore the last-known latest version from the DB so the badge survives container restarts."""
+    if APP_VERSION == "dev":
+        return
+
+    from .database import SessionLocal
+    from .models import AppSettings
+
+    db = SessionLocal()
+    try:
+        cfg = db.get(AppSettings, 1)
+        latest = cfg.latest_version if cfg else None
+        last_dt = cfg.last_update_check if cfg else None
+    finally:
+        db.close()
+
+    global _latest_version, _update_available, _last_run
+    with _lock:
+        if latest:
+            _latest_version = latest
+            _update_available = _is_newer(latest, APP_VERSION)
+        if last_dt is not None:
+            _last_run = last_dt.isoformat()
+    if latest:
+        logger.info("Update cache loaded from DB: latest=v%s update_available=%s", latest, _update_available)
+
+
 def refresh() -> None:
     if APP_VERSION == "dev":
         return
@@ -64,7 +91,7 @@ def refresh() -> None:
             _update_available = update_available
             _last_run = now.isoformat()
             _last_error = None
-        _persist_last_check(now)
+        _persist_check(now, tag)
         if update_available:
             logger.info("Update available: v%s (current: v%s)", tag, APP_VERSION)
     except Exception as exc:
@@ -74,7 +101,7 @@ def refresh() -> None:
         logger.warning("Update check failed: %s: %s", type(exc).__name__, exc)
 
 
-def _persist_last_check(dt: datetime) -> None:
+def _persist_check(dt: datetime, latest: str) -> None:
     from .database import SessionLocal
     from .models import AppSettings
     db = SessionLocal()
@@ -82,9 +109,10 @@ def _persist_last_check(dt: datetime) -> None:
         cfg = db.get(AppSettings, 1)
         if cfg:
             cfg.last_update_check = dt
+            cfg.latest_version = latest
             db.commit()
     except Exception as exc:
-        logger.warning("Could not persist update check timestamp: %s", exc)
+        logger.warning("Could not persist update check: %s", exc)
     finally:
         db.close()
 
