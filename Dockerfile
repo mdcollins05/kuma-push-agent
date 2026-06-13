@@ -16,11 +16,10 @@ FROM base AS production
 ARG VERSION=0.0.0+unknown
 ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_KUMA_PUSH_AGENT=$VERSION
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
-ENV HATCH_BUILD_HOOK_VCS_VERSION=$VERSION
 
 COPY app/ ./app/
 
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+RUN uv sync --frozen --no-dev
 
 # Download Bootstrap + Icons assets at build time so the image works offline.
 # Fonts must sit alongside the Icons CSS so relative url("./fonts/...") resolves.
@@ -55,7 +54,7 @@ COPY app/ ./app/
 COPY tests/ ./tests/
 
 # Install all deps including dev (pytest)
-RUN uv sync 2>/dev/null || uv sync
+RUN uv sync --frozen
 
 # Static dir must exist — main.py mounts it at import time
 RUN mkdir -p /data /config /app/app/static/css /app/app/static/js
