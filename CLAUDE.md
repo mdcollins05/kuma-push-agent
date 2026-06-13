@@ -125,6 +125,30 @@ This triggers the release workflow: tests run, then a multi-arch Docker image is
 
 Use the `vX.Y.Z-dev.N` format for pre-release tags (e.g. `v0.3.0-dev.1`). Do **not** use `-beta.N` — that was used historically but `dev` is the canonical format going forward. The `latest` Docker tag is suppressed for any tag containing `-`.
 
+### Release notes format
+
+GitHub releases follow a fixed structure for consistency across versions. Use only the sections that apply — drop any that have no entries.
+
+```markdown
+## Highlights
+- **Feature name** (#PR) — what changed and why it matters.
+
+## Fixes / polish
+- Short description (#PR).
+
+## Docs
+- Short description (#PR).
+
+## Breaking / migration
+- What changed, what users need to do (or that the migration is automatic).
+```
+
+Rules:
+- One bullet per merged PR. Every bullet ends with `(#PR)`.
+- **Bold** the feature name in Highlights only; Fixes / Docs are plain prose.
+- Order sections: Highlights → Fixes / polish → Docs → Breaking / migration.
+- Generate the list from `git log <prev-tag>..main --oneline` and group manually — don't autogenerate, the categorisation matters.
+
 ## Testing
 
 Tests run in a separate Docker image with dev dependencies (pytest) installed. No host Python install or running Kuma server needed.
