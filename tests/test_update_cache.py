@@ -47,6 +47,25 @@ class TestRefresh:
 
         assert uc._latest_version is None
 
+    @pytest.mark.parametrize("version", [
+        "0.0.0+unknown",        # hatch-vcs fallback when no tag and no env
+        "0.3.1.dev1+g6186ca3",  # PEP 440 local-version: post-tag dev build
+        "0.0.0",                # bare 0.0.0 — also unreleased
+    ])
+    def test_unreleased_build_is_noop(self, version):
+        """Untagged / local-version builds must not trigger update checks or show the badge."""
+        import app.update_cache as uc
+        uc._latest_version = None
+        uc._update_available = False
+
+        with patch("app.update_cache.APP_VERSION", version):
+            with patch("app.update_cache.httpx.Client") as mock_client:
+                uc.refresh()
+                mock_client.assert_not_called()
+
+        assert uc._latest_version is None
+        assert uc._update_available is False
+
     def test_update_available_when_newer_release(self):
         import app.update_cache as uc
 

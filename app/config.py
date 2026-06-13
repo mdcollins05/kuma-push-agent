@@ -1,9 +1,23 @@
 import os
 import pathlib
 import secrets
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-APP_VERSION: str = os.environ.get("APP_VERSION", "dev")
+
+def _resolve_app_version() -> str:
+    """Resolve the runtime version. Package metadata is the source of truth; env var
+    overrides for local hot-reload or one-off testing; falls back to 'dev'."""
+    override = os.environ.get("APP_VERSION")
+    if override:
+        return override
+    try:
+        return _pkg_version("kuma-push-agent")
+    except PackageNotFoundError:
+        return "dev"
+
+
+APP_VERSION: str = _resolve_app_version()
 
 
 class Settings(BaseSettings):
