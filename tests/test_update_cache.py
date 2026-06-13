@@ -132,16 +132,20 @@ class TestPersistence:
     def test_load_from_db_restores_state(self, client):
         import app.update_cache as uc
         import app.database as database_mod
+        from datetime import datetime
         from app.models import AppSettings
         from tests.conftest import TestingSessionLocal
 
         uc._latest_version = None
         uc._update_available = False
+        uc._last_run = None
 
+        check_dt = datetime(2026, 6, 12, 10, 0, 0)
         db = TestingSessionLocal()
         try:
             cfg = db.get(AppSettings, 1)
             cfg.latest_version = "0.9.0"
+            cfg.last_update_check = check_dt
             db.commit()
         finally:
             db.close()
@@ -156,12 +160,14 @@ class TestPersistence:
 
         assert uc._latest_version == "0.9.0"
         assert uc._update_available is True
+        assert uc._last_run == check_dt.isoformat()
 
         # Cleanup so the row doesn't leak into other tests
         db = TestingSessionLocal()
         try:
             cfg = db.get(AppSettings, 1)
             cfg.latest_version = None
+            cfg.last_update_check = None
             db.commit()
         finally:
             db.close()

@@ -56,16 +56,19 @@ def load_from_db() -> None:
     try:
         cfg = db.get(AppSettings, 1)
         latest = cfg.latest_version if cfg else None
+        last_dt = cfg.last_update_check if cfg else None
     finally:
         db.close()
 
     if not latest:
         return
 
-    global _latest_version, _update_available
+    global _latest_version, _update_available, _last_run
     with _lock:
         _latest_version = latest
         _update_available = _is_newer(latest, APP_VERSION)
+        if last_dt is not None:
+            _last_run = last_dt.isoformat()
     logger.info("Update cache loaded from DB: latest=v%s update_available=%s", latest, _update_available)
 
 
