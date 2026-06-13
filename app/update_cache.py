@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 REPO = "mdcollins05/kuma-push-agent"
 CHECK_INTERVAL_HOURS = 6
 
+
+def _is_dev_version(v: str) -> bool:
+    """Skip update checks for unreleased builds: explicit 'dev', PEP 440 local-version
+    builds (anything containing '+'), and the hatch-vcs '0.0.0+unknown' fallback."""
+    return v == "dev" or "+" in v or v.startswith("0.0.0")
+
 _lock = threading.Lock()
 _latest_version: str | None = None
 _update_available: bool = False
@@ -46,7 +52,7 @@ def status() -> dict:
 
 def load_from_db() -> None:
     """Restore the last-known latest version from the DB so the badge survives container restarts."""
-    if APP_VERSION == "dev":
+    if _is_dev_version(APP_VERSION):
         return
 
     from .database import SessionLocal
@@ -72,7 +78,7 @@ def load_from_db() -> None:
 
 
 def refresh() -> None:
-    if APP_VERSION == "dev":
+    if _is_dev_version(APP_VERSION):
         return
 
     global _latest_version, _update_available, _last_run, _last_error
