@@ -11,10 +11,9 @@ COPY pyproject.toml uv.lock ./
 FROM base AS production
 
 # Version passed in by CI from the git tag (e.g. "0.3.0"). hatch-vcs picks this
-# up via the SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<NAME> contract during `uv sync`,
-# so the runtime can read it from importlib.metadata without needing .git.
+# up via SETUPTOOLS_SCM_PRETEND_VERSION during `uv sync`, so the runtime can
+# read it from importlib.metadata without needing .git inside the image.
 ARG VERSION=0.0.0+unknown
-ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_KUMA_PUSH_AGENT=$VERSION
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
 
 COPY app/ ./app/
@@ -47,7 +46,6 @@ CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "300
 FROM base AS test
 
 ARG VERSION=0.0.0+unknown
-ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_KUMA_PUSH_AGENT=$VERSION
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
 
 COPY app/ ./app/
