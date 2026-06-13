@@ -126,8 +126,59 @@ class TestPersistence:
                 assert cfg.last_update_check is not None
             finally:
                 db.close()
+            # Cleanup so persisted values don't leak into later tests
+            db = TestingSessionLocal()
+            try:
+                cfg = db.get(AppSettings, 1)
+                cfg.latest_version = None
+                cfg.last_update_check = None
+                db.commit()
+            finally:
+                db.close()
         finally:
             database_mod.SessionLocal = monkeypatch_target
+
+    def test_load_from_db_restores_last_check_without_version(self, client):
+        """If the DB has a timestamp but no latest_version, _last_run still restores."""
+        import app.update_cache as uc
+        import app.database as database_mod
+        from datetime import datetime
+        from app.models import AppSettings
+        from tests.conftest import TestingSessionLocal
+
+        uc._latest_version = None
+        uc._update_available = False
+        uc._last_run = None
+
+        check_dt = datetime(2026, 6, 12, 11, 0, 0)
+        db = TestingSessionLocal()
+        try:
+            cfg = db.get(AppSettings, 1)
+            cfg.latest_version = None
+            cfg.last_update_check = check_dt
+            db.commit()
+        finally:
+            db.close()
+
+        monkeypatch_target = database_mod.SessionLocal
+        database_mod.SessionLocal = TestingSessionLocal
+        try:
+            with patch("app.update_cache.APP_VERSION", "0.2.0"):
+                uc.load_from_db()
+        finally:
+            database_mod.SessionLocal = monkeypatch_target
+
+        assert uc._latest_version is None
+        assert uc._update_available is False
+        assert uc._last_run == check_dt.isoformat()
+
+        db = TestingSessionLocal()
+        try:
+            cfg = db.get(AppSettings, 1)
+            cfg.last_update_check = None
+            db.commit()
+        finally:
+            db.close()
 
     def test_load_from_db_restores_state(self, client):
         import app.update_cache as uc
