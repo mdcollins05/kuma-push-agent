@@ -5,17 +5,22 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM base AS production
 
-ARG VERSION=dev
-ENV APP_VERSION=$VERSION
-
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+# Version passed in by CI from the git tag (e.g. "0.3.0"). hatch-vcs picks this
+# up via the SETUPTOOLS_SCM_PRETEND_VERSION_FOR_<NAME> contract during `uv sync`,
+# so the runtime can read it from importlib.metadata without needing .git.
+ARG VERSION=0.0.0+unknown
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_KUMA_PUSH_AGENT=$VERSION
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
+ENV HATCH_BUILD_HOOK_VCS_VERSION=$VERSION
 
 COPY app/ ./app/
+
+RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
 
 # Download Bootstrap + Icons assets at build time so the image works offline.
 # Fonts must sit alongside the Icons CSS so relative url("./fonts/...") resolves.
@@ -42,11 +47,15 @@ CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "300
 # ── Test stage ────────────────────────────────────────────────────────────────
 FROM base AS test
 
-# Install all deps including dev (pytest)
-RUN uv sync 2>/dev/null || uv sync
+ARG VERSION=0.0.0+unknown
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_KUMA_PUSH_AGENT=$VERSION
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION
 
 COPY app/ ./app/
 COPY tests/ ./tests/
+
+# Install all deps including dev (pytest)
+RUN uv sync 2>/dev/null || uv sync
 
 # Static dir must exist — main.py mounts it at import time
 RUN mkdir -p /data /config /app/app/static/css /app/app/static/js

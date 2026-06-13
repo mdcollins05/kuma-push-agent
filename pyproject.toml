@@ -1,6 +1,6 @@
 [project]
 name = "kuma-push-agent"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Remote health-check agent for Uptime Kuma"
 requires-python = ">=3.12"
 dependencies = [
@@ -22,8 +22,12 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0+unknown"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
