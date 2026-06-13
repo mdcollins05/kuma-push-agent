@@ -227,6 +227,7 @@ app = FastAPI(
         {"name": "Notifications", "description": "View Uptime Kuma notification channels."},
         {"name": "Groups", "description": "View Uptime Kuma group monitors."},
         {"name": "Monitors", "description": "Create, read, update, and delete health-check monitors."},
+        {"name": "System", "description": "Application metadata — version, update availability."},
     ],
     swagger_ui_parameters={"persistAuthorization": True},
     lifespan=lifespan,

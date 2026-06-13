@@ -176,6 +176,45 @@ class TestPersistence:
         assert uc._latest_version is None
         assert uc._update_available is False
 
+    def test_api_endpoint_returns_cached_state(self, client):
+        """GET /api/v1/system/update mirrors the in-memory cache + adds release_url."""
+        from tests.conftest import HEADERS
+        import app.update_cache as uc
+
+        uc._latest_version = "0.4.0"
+        uc._update_available = True
+        uc._last_run = "2026-06-12T10:00:00"
+        try:
+            with patch("app.update_cache.APP_VERSION", "0.2.0"), \
+                 patch("app.routers.api.APP_VERSION", "0.2.0", create=True):
+                resp = client.get("/api/v1/system/update", headers=HEADERS)
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["latest_version"] == "0.4.0"
+            assert body["update_available"] is True
+            assert body["last_check"] == "2026-06-12T10:00:00"
+            assert body["release_url"] == "https://github.com/mdcollins05/kuma-push-agent/releases/tag/v0.4.0"
+        finally:
+            uc._latest_version = None
+            uc._update_available = False
+            uc._last_run = None
+
+    def test_api_endpoint_omits_release_url_when_current(self, client):
+        from tests.conftest import HEADERS
+        import app.update_cache as uc
+
+        uc._latest_version = "0.2.0"
+        uc._update_available = False
+        try:
+            resp = client.get("/api/v1/system/update", headers=HEADERS)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["update_available"] is False
+            assert body["release_url"] is None
+        finally:
+            uc._latest_version = None
+            uc._update_available = False
+
     def test_load_from_db_handles_missing_row(self, client):
         """No persisted version → leaves module state untouched."""
         import app.update_cache as uc

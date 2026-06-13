@@ -17,6 +17,7 @@ from ..schemas import (
     NotificationResponse,
     SetupRequest, SetupResponse,
     TagCreate, TagResponse,
+    UpdateInfoResponse,
 )
 from ..scheduler import add_check_job, remove_check_job
 from ..tag_cache import get as get_tags
@@ -86,6 +87,38 @@ def configure_kuma(payload: KumaSettingsRequest, db: Session = Depends(get_db)):
         configured=app_settings.configured,
         kuma_url=app_settings.kuma_url,
         kuma_username=app_settings.kuma_username,
+    )
+
+
+@router.get(
+    "/system/update",
+    response_model=UpdateInfoResponse,
+    tags=["System"],
+    summary="Check for available updates",
+    description=(
+        "Returns the cached result of the most recent GitHub release check. "
+        "The agent polls the `mdcollins05/kuma-push-agent` repository at most every 6 hours. "
+        "When `update_available` is true, `release_url` links to the changelog. "
+        "On a `dev` build, `latest_version` is null and `update_available` is always false."
+    ),
+)
+def get_update_info():
+    from ..config import APP_VERSION
+    from ..update_cache import REPO, get as update_get, status as update_status
+    cached = update_get()
+    last = update_status().get("last_run")
+    latest = cached.get("latest")
+    update_available = bool(cached.get("update_available"))
+    return UpdateInfoResponse(
+        current_version=APP_VERSION,
+        latest_version=latest,
+        update_available=update_available,
+        last_check=last,
+        release_url=(
+            f"https://github.com/{REPO}/releases/tag/v{latest}"
+            if update_available and latest
+            else None
+        ),
     )
 
 
