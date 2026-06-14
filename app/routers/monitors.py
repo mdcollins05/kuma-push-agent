@@ -470,6 +470,10 @@ async def monitor_recreate_kuma(
         monitor.kuma_synced = False
         monitor.kuma_missing = False
         db.commit()
+        # Fire the check immediately so the checker creates its sync_monitor task
+        # right away — otherwise the sync banner stays empty for up to `interval`
+        # seconds while waiting for the next scheduled tick.
+        add_check_job(monitor.id, monitor.interval)
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
 

@@ -374,6 +374,8 @@ def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
     monitor.kuma_missing = False
     db.commit()
     db.refresh(monitor)
+    # Fire the check immediately so the sync_monitor task is created right away.
+    add_check_job(monitor.id, monitor.interval)
     return _to_response(monitor)
 
 
