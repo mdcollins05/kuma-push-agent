@@ -1,4 +1,5 @@
-from tests.conftest import HEADERS
+from app.models import KumaTask
+from tests.conftest import HEADERS, TestingSessionLocal
 
 
 # ── GET /api/v1/tags ──────────────────────────────────────────────────────────
@@ -11,10 +12,28 @@ def test_list_tags_returns_list(client):
 
 # ── POST /api/v1/tags ─────────────────────────────────────────────────────────
 
-def test_create_tag_without_kuma_returns_503(client):
-    # conftest seeds configured=False so Kuma calls are skipped
-    resp = client.post("/api/v1/tags", json={"name": "prod", "color": "#3396FF"}, headers=HEADERS)
-    assert resp.status_code == 503
+def test_create_tag_without_kuma_queues_task(client):
+    """Tag creation always queues — the processor holds the task until Kuma is reachable.
+    Previously this returned 503 when Kuma wasn't configured, silently losing the request."""
+    resp = client.post("/api/v1/tags", json={"name": "queued-prod", "color": "#3396FF"}, headers=HEADERS)
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["name"] == "queued-prod"
+    assert body["id"] is None
+
+    db = TestingSessionLocal()
+    try:
+        queued = db.query(KumaTask).filter(
+            KumaTask.task_type == "create_tag",
+            KumaTask.status == "pending",
+        ).all()
+        assert any(t.payload.get("name") == "queued-prod" for t in queued)
+        for t in queued:
+            if t.payload.get("name") == "queued-prod":
+                db.delete(t)
+        db.commit()
+    finally:
+        db.close()
 
 
 # ── GET /api/v1/notifications ─────────────────────────────────────────────────
