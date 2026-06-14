@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_db, require_api_key
 from ..group_cache import get as get_groups
 from ..models import AppSettings, KumaTask, Monitor
-from ..monitor_status import monitor_status_dict
+from ..monitor_status import monitor_status_dict, task_status_counts
 from ..notification_cache import get as get_notifications
 from ..passwords import hash_password
 from ..schemas import (
@@ -199,19 +199,11 @@ def list_monitors(db: Session = Depends(get_db)):
     description="Returns live status fields for all monitors — last check time, last status, response time, error, and Kuma sync state.",
 )
 def list_monitor_statuses(db: Session = Depends(get_db)):
-    from sqlalchemy import func
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).order_by(Monitor.name).all()
 
-    task_counts: dict[int, dict[str, int]] = {}
-    for monitor_id, status, count in (
-        db.query(KumaTask.monitor_id, KumaTask.status, func.count(KumaTask.id))
-        .filter(KumaTask.monitor_id.isnot(None), KumaTask.status.in_(["pending", "failed"]))
-        .group_by(KumaTask.monitor_id, KumaTask.status)
-        .all()
-    ):
-        task_counts.setdefault(monitor_id, {})[status] = count
+    task_counts = task_status_counts(db)
 
     pending_create_tag_ids = {
         monitor_id for (monitor_id,) in (

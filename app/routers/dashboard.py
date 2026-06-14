@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from sqlalchemy import func
-
 from ..dependencies import get_db, require_auth
-from ..models import AppSettings, KumaTask, Monitor
+from ..models import AppSettings, Monitor
+from ..monitor_status import task_status_counts
 from ..templates import templates
 
 router = APIRouter()
@@ -20,16 +19,7 @@ async def dashboard(
     app_settings = db.get(AppSettings, 1)
     kuma_configured = bool(app_settings and app_settings.configured)
 
-    # {monitor_id: {"pending": n, "failed": n}}
-    task_rows = (
-        db.query(KumaTask.monitor_id, KumaTask.status, func.count(KumaTask.id))
-        .filter(KumaTask.monitor_id.isnot(None), KumaTask.status.in_(["pending", "failed"]))
-        .group_by(KumaTask.monitor_id, KumaTask.status)
-        .all()
-    )
-    task_counts: dict[int, dict] = {}
-    for mid, status, count in task_rows:
-        task_counts.setdefault(mid, {"pending": 0, "failed": 0})[status] = count
+    task_counts = task_status_counts(db)
 
     return templates.TemplateResponse(request, "dashboard.html", {
         "monitors": monitors,
