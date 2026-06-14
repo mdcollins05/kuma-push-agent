@@ -18,6 +18,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# Substrings of OperationalError messages that mean a migration is already
+# applied (or wasn't needed). Anything else means a real DB problem — locked
+# DB, syntax error, permission issue, schema corruption — and must crash
+# startup so we don't silently accept a half-broken schema.
+_MIGRATION_BENIGN_ERRORS = (
+    "duplicate column name",                       # ALTER TABLE ADD COLUMN twice
+    "no such column",                              # DROP COLUMN / RENAME COLUMN of already-dropped col
+    "no such table",                               # ALTER TABLE on already-renamed/missing table
+    "already exists",                              # generic CREATE / RENAME conflict
+    "already another table or index with this name",  # SQLite RENAME TO target already exists
+)
+
+
+def _migration_already_applied(exc: Exception) -> bool:
+    """True when a DB exception matches a known "already done" pattern. False
+    forces the caller to re-raise so startup fails loudly."""
+    msg = str(exc).lower()
+    return any(needle in msg for needle in _MIGRATION_BENIGN_ERRORS)
+
+
 def _migrate_monitor_config(target_engine) -> None:
     """v0.3.0 migration: fold per-type HTTP fields into `config` JSON, drop legacy columns.
 
@@ -70,6 +90,7 @@ def _migrate_monitor_config(target_engine) -> None:
                 {"config": _json.dumps(new_config), "id": row_map["id"]},
             )
         conn.commit()
+        from sqlalchemy.exc import OperationalError
         for ddl in [
             "ALTER TABLE monitors DROP COLUMN url",
             "ALTER TABLE monitors DROP COLUMN expected_codes",
@@ -80,7 +101,12 @@ def _migrate_monitor_config(target_engine) -> None:
             try:
                 conn.execute(sa.text(ddl))
                 conn.commit()
-            except Exception as exc:
+            except OperationalError as exc:
+                if _migration_already_applied(exc):
+                    continue  # column already dropped
+                # Older SQLite without DROP COLUMN support reports this here;
+                # log and continue rather than crash, since the legacy columns
+                # being left behind is harmless (config is the live source).
                 logger.warning("Could not drop legacy column (%s): %s", ddl, exc)
 
 
@@ -90,6 +116,7 @@ async def lifespan(app: FastAPI):
     from .models import Monitor
 
     # Rename legacy tables/columns before create_all so SQLAlchemy sees the new names
+    from sqlalchemy.exc import OperationalError
     with engine.connect() as conn:
         for ddl in [
             "ALTER TABLE kuma_jobs RENAME TO kuma_tasks",
@@ -98,12 +125,14 @@ async def lifespan(app: FastAPI):
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
                 conn.commit()
-            except Exception:
-                pass  # idempotent — table/column already renamed or doesn't exist yet
+            except OperationalError as exc:
+                if _migration_already_applied(exc):
+                    continue  # idempotent — table/column already renamed or doesn't exist yet
+                logger.error("Legacy rename migration failed: %s — %s", ddl, exc)
+                raise
 
     # Rename legacy task type strings — must not be silently swallowed on real errors
     # because _run() no longer handles the old names and would fail those tasks permanently.
-    from sqlalchemy.exc import OperationalError
     with engine.connect() as conn:
         for ddl in [
             "UPDATE kuma_tasks SET task_type = 'update_monitor' WHERE task_type = 'update'",
@@ -123,7 +152,8 @@ async def lifespan(app: FastAPI):
 
     Base.metadata.create_all(bind=engine)
 
-    # Add columns introduced after initial schema (idempotent — fails silently if column exists)
+    # Add columns introduced after initial schema (idempotent — skips ALTERs that
+    # have already been applied, but real DDL errors still surface).
     with engine.connect() as conn:
         for ddl in [
             "ALTER TABLE monitors ADD COLUMN max_response_ms INTEGER",
@@ -155,8 +185,11 @@ async def lifespan(app: FastAPI):
             try:
                 conn.execute(__import__("sqlalchemy").text(ddl))
                 conn.commit()
-            except Exception:
-                pass
+            except OperationalError as exc:
+                if _migration_already_applied(exc):
+                    continue
+                logger.error("Schema migration failed: %s — %s", ddl, exc)
+                raise
 
     _migrate_monitor_config(engine)
 
