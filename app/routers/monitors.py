@@ -259,7 +259,7 @@ async def monitor_new_post(
     db.commit()
     db.refresh(monitor)
 
-    if new_names and kuma_url:
+    if new_names:
         from ..kuma_queue import enqueue as kuma_enqueue
         kuma_enqueue(db, "create_tags", {
             "monitor_id": monitor.id,
@@ -395,21 +395,20 @@ async def monitor_edit_post(
     db.commit()
 
     if monitor.kuma_synced and monitor.kuma_monitor_id and (name_changed or interval_changed or notifications_changed or group_changed):
-        if kuma_url:
-            from ..kuma_queue import enqueue
-            fields = {}
-            if name_changed:
-                fields["name"] = name
-            if interval_changed:
-                fields["interval"] = interval + max(30, interval // 2)
-            if notifications_changed:
-                fields["notificationIDList"] = {str(nid): True for nid in notification_ids}
-            if group_changed:
-                fields["parent"] = kuma_group_id
-            enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
-                    monitor.name, monitor_id=monitor_id)
+        from ..kuma_queue import enqueue
+        fields = {}
+        if name_changed:
+            fields["name"] = name
+        if interval_changed:
+            fields["interval"] = interval + max(30, interval // 2)
+        if notifications_changed:
+            fields["notificationIDList"] = {str(nid): True for nid in notification_ids}
+        if group_changed:
+            fields["parent"] = kuma_group_id
+        enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+                monitor.name, monitor_id=monitor_id)
 
-    if monitor.kuma_synced and monitor.kuma_monitor_id and tags_changed and kuma_url:
+    if monitor.kuma_synced and monitor.kuma_monitor_id and tags_changed:
         from ..kuma_queue import enqueue as kuma_enqueue
         kuma_enqueue(db, "update_tags", {
             "kuma_monitor_id": monitor.kuma_monitor_id,
@@ -417,7 +416,7 @@ async def monitor_edit_post(
             "removed": list(old_tag_ids - new_tag_ids),
         }, monitor.name, monitor_id=monitor_id)
 
-    if new_names and kuma_url:
+    if new_names:
         from ..kuma_queue import enqueue as kuma_enqueue
         kuma_enqueue(db, "create_tags", {
             "monitor_id": monitor_id,
@@ -441,18 +440,17 @@ async def monitor_resync(
     if not monitor or not monitor.kuma_synced or not monitor.kuma_monitor_id:
         return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
-    kuma_url, _, __ = _kuma_creds(db)
-    if kuma_url:
-        from ..kuma_queue import cancel_monitor_tasks, enqueue
-        cancel_monitor_tasks(db, monitor_id)
-        fields = {
-            "name": monitor.name,
-            "interval": monitor.interval + max(30, monitor.interval // 2),
-        }
-        if monitor.notification_ids:
-            fields["notificationIDList"] = {str(nid): True for nid in monitor.notification_ids}
-        enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
-                monitor.name, monitor_id=monitor_id)
+    from ..kuma_queue import enqueue
+    fields = {
+        "name": monitor.name,
+        "interval": monitor.interval + max(30, monitor.interval // 2),
+    }
+    if monitor.notification_ids:
+        fields["notificationIDList"] = {str(nid): True for nid in monitor.notification_ids}
+    # enqueue() coalesces — the new update_monitor cancels any prior pending one,
+    # so the explicit cancel_monitor_tasks() the old code did is no longer needed.
+    enqueue(db, "update_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id, "fields": fields},
+            monitor.name, monitor_id=monitor_id)
 
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
@@ -502,8 +500,7 @@ async def monitor_pause(
     if not monitor:
         return RedirectResponse("/", status_code=302)
 
-    kuma_url, _, __ = _kuma_creds(db)
-    if kuma_url and monitor.kuma_monitor_id:
+    if monitor.kuma_monitor_id:
         from ..kuma_queue import enqueue
         enqueue(db, "pause_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
@@ -523,8 +520,7 @@ async def monitor_resume(
     if not monitor:
         return RedirectResponse("/", status_code=302)
 
-    kuma_url, _, __ = _kuma_creds(db)
-    if kuma_url and monitor.kuma_monitor_id:
+    if monitor.kuma_monitor_id:
         from ..kuma_queue import enqueue
         enqueue(db, "resume_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
@@ -546,10 +542,8 @@ async def monitor_delete(
         return RedirectResponse("/", status_code=302)
 
     if remove_from_kuma is not None and monitor.kuma_synced and monitor.kuma_monitor_id:
-        kuma_url, _, __ = _kuma_creds(db)
-        if kuma_url:
-            from ..kuma_queue import enqueue
-            enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
+        from ..kuma_queue import enqueue
+        enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id}, monitor.name, monitor_id=monitor_id)
 
     remove_check_job(monitor_id)
     db.delete(monitor)

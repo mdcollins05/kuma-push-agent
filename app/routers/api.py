@@ -142,14 +142,11 @@ def list_tags():
     description=(
         "Enqueues creation of a new tag in Uptime Kuma. Returns 202 immediately — "
         "`id` will be null until the queue processor runs (within ~10 seconds). "
-        "Requires Kuma to be configured."
+        "If Uptime Kuma is not currently reachable, the task is held in the queue "
+        "and replayed once the connection is restored."
     ),
-    responses={503: {"description": "Uptime Kuma not configured"}},
 )
 def create_tag(payload: TagCreate, db: Session = Depends(get_db)):
-    cfg = db.get(AppSettings, 1)
-    if not cfg or not cfg.configured:
-        raise HTTPException(status_code=503, detail="Uptime Kuma is not configured")
     from ..kuma_queue import enqueue
     enqueue(db, "create_tag", {"name": payload.name, "color": payload.color})
     return TagResponse(id=None, name=payload.name, color=payload.color)
@@ -314,10 +311,7 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
     monitor.kuma_group_id = payload.kuma_group_id
     db.commit()
 
-    app_cfg = db.get(AppSettings, 1)
-    kuma_url = app_cfg.kuma_url if (app_cfg and app_cfg.configured) else None
-
-    if monitor.kuma_synced and monitor.kuma_monitor_id and kuma_url:
+    if monitor.kuma_synced and monitor.kuma_monitor_id:
         from ..kuma_queue import enqueue
         if name_changed or interval_changed or notifications_changed or group_changed:
             fields = {}
@@ -397,11 +391,9 @@ def delete_monitor_api(monitor_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Monitor not found")
 
     if monitor.kuma_synced and monitor.kuma_monitor_id:
-        app_cfg = db.get(AppSettings, 1)
-        if app_cfg and app_cfg.kuma_url:
-            from ..kuma_queue import enqueue
-            enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id},
-                    monitor.name, monitor_id=monitor_id)
+        from ..kuma_queue import enqueue
+        enqueue(db, "delete_monitor", {"kuma_monitor_id": monitor.kuma_monitor_id},
+                monitor.name, monitor_id=monitor_id)
 
     remove_check_job(monitor_id)
     db.delete(monitor)

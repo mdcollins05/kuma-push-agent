@@ -22,7 +22,29 @@ def processor_status() -> dict:
 
 
 def enqueue(db, task_type: str, payload: dict, monitor_name: str = None, monitor_id: int = None) -> None:
+    """Insert a Kuma sync task, coalescing against any pending/failed prior tasks
+    that the new one would supersede. This keeps the queue from stacking stale
+    intent during periods when Kuma is unreachable.
+
+    Coalescing rules per task_type (only when monitor_id is set):
+      - delete_monitor: cancel ALL pending/failed tasks for the monitor — they're
+        moot once Kuma's row is gone.
+      - update_monitor: cancel prior pending/failed update_monitor — the latest
+        full-field replacement is the only intent that matters.
+      - pause_monitor / resume_monitor: cancel pending pause/resume so we never
+        leave a "pause, then resume" pair stacked.
+      - update_tags: merge prior pending added/removed sets into the new payload
+        and cancel them. If the merge nets to no change, skip the insert entirely.
+      - create_tag / create_tags / sync_monitor: independent, no coalescing.
+    """
     from .models import KumaTask
+
+    if monitor_id is not None:
+        skip_insert = _coalesce(db, task_type, monitor_id, payload)
+        if skip_insert:
+            db.commit()
+            return
+
     db.add(KumaTask(
         task_type=task_type,
         payload=payload,
@@ -30,6 +52,65 @@ def enqueue(db, task_type: str, payload: dict, monitor_name: str = None, monitor
         monitor_id=monitor_id,
     ))
     db.commit()
+
+
+def _coalesce(db, task_type: str, monitor_id: int, payload: dict) -> bool:
+    """Cancel superseded prior tasks (and mutate payload for update_tags merge).
+    Returns True when the new task should not be inserted because it merged to
+    a no-op."""
+    from .models import KumaTask
+
+    if task_type == "delete_monitor":
+        db.query(KumaTask).filter(
+            KumaTask.monitor_id == monitor_id,
+            KumaTask.status.in_(["pending", "failed"]),
+        ).update({"status": "cancelled"}, synchronize_session=False)
+        return False
+
+    if task_type == "update_monitor":
+        db.query(KumaTask).filter(
+            KumaTask.monitor_id == monitor_id,
+            KumaTask.task_type == "update_monitor",
+            KumaTask.status.in_(["pending", "failed"]),
+        ).update({"status": "cancelled"}, synchronize_session=False)
+        return False
+
+    if task_type in ("pause_monitor", "resume_monitor"):
+        db.query(KumaTask).filter(
+            KumaTask.monitor_id == monitor_id,
+            KumaTask.task_type.in_(["pause_monitor", "resume_monitor"]),
+            KumaTask.status.in_(["pending", "failed"]),
+        ).update({"status": "cancelled"}, synchronize_session=False)
+        return False
+
+    if task_type == "update_tags":
+        prior = db.query(KumaTask).filter(
+            KumaTask.monitor_id == monitor_id,
+            KumaTask.task_type == "update_tags",
+            KumaTask.status.in_(["pending", "failed"]),
+        ).all()
+        if not prior:
+            return False
+        prior_added: set = set()
+        prior_removed: set = set()
+        for t in prior:
+            prior_added |= set((t.payload or {}).get("added", []))
+            prior_removed |= set((t.payload or {}).get("removed", []))
+            t.status = "cancelled"
+        new_added = set(payload.get("added", []))
+        new_removed = set(payload.get("removed", []))
+        # Net delta: a tag is added iff someone wanted it added and nobody
+        # later wanted it removed; symmetrically for removals. This collapses
+        # add-then-remove pairs to a no-op. We can't reason about swap cases
+        # (add-then-remove of one tag combined with remove-then-add of another)
+        # without knowing Kuma's pre-prior-task state, so those merge to no-op too.
+        all_added = prior_added | new_added
+        all_removed = prior_removed | new_removed
+        payload["added"] = sorted(all_added - all_removed)
+        payload["removed"] = sorted(all_removed - all_added)
+        return not payload["added"] and not payload["removed"]
+
+    return False
 
 
 def cancel_monitor_tasks(db, monitor_id: int) -> None:
