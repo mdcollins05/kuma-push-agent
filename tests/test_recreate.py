@@ -138,6 +138,25 @@ def test_verify_returns_true_clears_flag_only(client, monkeypatch, configured_se
         _cleanup(mid)
 
 
+def test_verify_returns_true_when_flag_was_already_clear(client, monkeypatch, configured_settings):
+    """User clicks Recreate preemptively (kuma_missing already False).
+    Verify must still return VERIFIED — no commit, no scheduling, no reset."""
+    calls = _stub_add_check_job(monkeypatch)
+    monkeypatch.setattr("app.kuma.monitor_exists", lambda *a, **kw: True)
+
+    mid = _make_monitor(kuma_missing=False)
+    try:
+        outcome = recreate.verify_then_reset(mid)
+        assert outcome == recreate.OUTCOME_VERIFIED
+        m = _read(mid)
+        assert m.kuma_monitor_id == 42
+        assert m.kuma_missing is False
+        assert m.kuma_synced is True
+        assert calls == []
+    finally:
+        _cleanup(mid)
+
+
 def test_verify_raises_leaves_state_untouched(client, monkeypatch, configured_settings):
     """Kuma unreachable / auth failed → don't change anything so the user can retry."""
     calls = _stub_add_check_job(monkeypatch)
@@ -194,3 +213,29 @@ def test_unknown_monitor_id_is_unreachable(client, monkeypatch, configured_setti
     _stub_add_check_job(monkeypatch)
     outcome = recreate.verify_then_reset(99999999)
     assert outcome == recreate.OUTCOME_UNREACHABLE
+
+
+# ── UI route smoke test ─────────────────────────────────────────────────────
+
+def test_ui_route_runs_verify_then_reset_via_threadpool(client, monkeypatch, configured_settings):
+    """Posting to the UI /monitors/{id}/recreate-kuma route wires through
+    run_in_threadpool to verify_then_reset and persists the reset. Catches
+    regressions if the async/await glue or threadpool dispatch breaks."""
+    _stub_add_check_job(monkeypatch)
+    # Confirmed-missing path so the reset actually happens.
+    monkeypatch.setattr("app.kuma.monitor_exists", lambda *a, **kw: False)
+
+    mid = _make_monitor()
+    try:
+        resp = client.post(f"/monitors/{mid}/recreate-kuma", follow_redirects=False)
+        # UI route redirects back to the edit page.
+        assert resp.status_code == 302
+        assert resp.headers["location"] == f"/monitors/{mid}/edit"
+
+        m = _read(mid)
+        assert m.kuma_monitor_id is None
+        assert m.push_token is None
+        assert m.kuma_synced is False
+        assert m.kuma_missing is False
+    finally:
+        _cleanup(mid)
