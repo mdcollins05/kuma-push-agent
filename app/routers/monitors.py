@@ -463,17 +463,8 @@ async def monitor_recreate_kuma(
 ):
     monitor = db.get(Monitor, monitor_id)
     if monitor and (monitor.kuma_monitor_id or monitor.kuma_synced):
-        from ..kuma_queue import cancel_monitor_tasks
-        cancel_monitor_tasks(db, monitor_id)
-        monitor.kuma_monitor_id = None
-        monitor.push_token = None
-        monitor.kuma_synced = False
-        monitor.kuma_missing = False
-        db.commit()
-        # Fire the check immediately so the checker creates its sync_monitor task
-        # right away — otherwise the sync banner stays empty for up to `interval`
-        # seconds while waiting for the next scheduled tick.
-        add_check_job(monitor.id, monitor.interval)
+        from ..recreate import recreate_or_verify
+        recreate_or_verify(monitor, db.get(AppSettings, 1), db)
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
 

@@ -364,18 +364,13 @@ def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
             status_code=409,
             detail="Monitor has never been synced with Uptime Kuma — nothing to recreate",
         )
-    # Drop queued tasks that target the now-dead kuma_monitor_id — otherwise
-    # they'd keep retrying against a stale ID after the fresh provision lands.
-    from ..kuma_queue import cancel_monitor_tasks
-    cancel_monitor_tasks(db, monitor_id)
-    monitor.kuma_monitor_id = None
-    monitor.push_token = None
-    monitor.kuma_synced = False
-    monitor.kuma_missing = False
-    db.commit()
+    # Defensive: probe Kuma first. If the monitor is actually still alive on
+    # Kuma (e.g. restored from backup, transient outage), clear kuma_missing
+    # but DON'T drop the IDs — that would create a duplicate when the checker
+    # provisions a fresh one. Only do the full reset on a confirmed 404.
+    from ..recreate import recreate_or_verify
+    recreate_or_verify(monitor, db.get(AppSettings, 1), db)
     db.refresh(monitor)
-    # Fire the check immediately so the sync_monitor task is created right away.
-    add_check_job(monitor.id, monitor.interval)
     return _to_response(monitor)
 
 

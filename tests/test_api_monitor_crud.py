@@ -446,7 +446,7 @@ def test_recreate_kuma_reschedules_immediate_check(client, monkeypatch):
     def fake_add_check_job(monitor_id, interval, last_check_time=None):
         calls.append((monitor_id, interval))
 
-    monkeypatch.setattr("app.routers.api.add_check_job", fake_add_check_job)
+    monkeypatch.setattr("app.recreate.add_check_job", fake_add_check_job)
 
     try:
         resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
