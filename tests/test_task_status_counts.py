@@ -180,3 +180,82 @@ def test_bulk_query_returns_all_monitors_when_unfiltered(client):
     finally:
         _cleanup(mid_a)
         _cleanup(mid_b)
+
+
+def test_cancelled_status_excluded(client):
+    """Cancelled tasks are neither live work nor unresolved failures — drop them."""
+    mid = _make_monitor("Cancelled Only")
+    try:
+        _make_task(mid, "update_monitor", "cancelled")
+        assert _counts(mid) == {}
+    finally:
+        _cleanup(mid)
+
+
+def test_cancelled_does_not_shadow_a_failure(client):
+    """A cancelled retry is not a success — must NOT shadow an earlier failure."""
+    mid = _make_monitor("Cancelled No Shadow")
+    try:
+        _make_task(mid, "update_monitor", "failed")
+        _make_task(mid, "update_monitor", "cancelled")
+        assert _counts(mid) == {"failed": 1}
+    finally:
+        _cleanup(mid)
+
+
+def test_cancelled_alongside_live_pending_and_failed(client):
+    """Cancelled rows mixed with real work must not skew either counter."""
+    mid = _make_monitor("Mixed With Cancelled")
+    try:
+        _make_task(mid, "update_monitor", "cancelled")
+        _make_task(mid, "pause_monitor", "pending")
+        _make_task(mid, "delete_monitor", "failed")
+        assert _counts(mid) == {"pending": 1, "failed": 1}
+    finally:
+        _cleanup(mid)
+
+
+def test_mixed_task_types_shadow_independently(client):
+    """A done update_monitor must NOT shadow a failed pause_monitor on the same monitor."""
+    mid = _make_monitor("Per Type Shadow")
+    try:
+        _make_task(mid, "update_monitor", "failed")
+        _make_task(mid, "pause_monitor", "failed")
+        # Later success only on update_monitor — pause_monitor failure must remain.
+        _make_task(mid, "update_monitor", "done")
+        assert _counts(mid) == {"failed": 1}
+    finally:
+        _cleanup(mid)
+
+
+def test_mixed_task_types_each_shadowed_by_their_own_done(client):
+    """Two distinct types, each shadowed by its own done — both clear."""
+    mid = _make_monitor("Both Cleared")
+    try:
+        _make_task(mid, "update_monitor", "failed")
+        _make_task(mid, "pause_monitor", "failed")
+        _make_task(mid, "update_monitor", "done")
+        _make_task(mid, "pause_monitor", "done")
+        assert _counts(mid) == {}
+    finally:
+        _cleanup(mid)
+
+
+def test_bulk_mixed_task_types_across_monitors(client):
+    """In a bulk query, each (monitor_id, task_type) pair is evaluated independently."""
+    mid_a = _make_monitor("Bulk Mixed A")
+    mid_b = _make_monitor("Bulk Mixed B")
+    try:
+        # A: failed update shadowed, failed pause not shadowed.
+        _make_task(mid_a, "update_monitor", "failed")
+        _make_task(mid_a, "pause_monitor", "failed")
+        _make_task(mid_a, "update_monitor", "done")
+        # B: pending delete + failed update (no later done).
+        _make_task(mid_b, "delete_monitor", "pending")
+        _make_task(mid_b, "update_monitor", "failed")
+        all_counts = _counts(None)
+        assert all_counts.get(mid_a, {}) == {"failed": 1}
+        assert all_counts.get(mid_b, {}) == {"pending": 1, "failed": 1}
+    finally:
+        _cleanup(mid_a)
+        _cleanup(mid_b)
