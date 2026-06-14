@@ -38,6 +38,55 @@ def _migration_already_applied(exc: Exception) -> bool:
     return any(needle in msg for needle in _MIGRATION_BENIGN_ERRORS)
 
 
+def _migrate_legacy_renames(target_engine) -> None:
+    """Rename the v0.1 `kuma_jobs` table → `kuma_tasks` and its `job_type` column.
+
+    Pre-checks the schema with the dialect inspector so we only run ALTER when
+    actually needed and so half-migrated states (both old and new tables/columns
+    present) crash startup loudly rather than letting rows get stranded.
+    """
+    import sqlalchemy as sa
+    inspector = sa.inspect(target_engine)
+    tables = set(inspector.get_table_names())
+
+    if "kuma_jobs" in tables and "kuma_tasks" in tables:
+        # Common case in DBs upgraded by the prior broad-except code: the rename
+        # actually ran but the empty source table got left behind. Safe to drop
+        # if it's empty; refuse otherwise so real data isn't silently abandoned.
+        with target_engine.connect() as conn:
+            stranded = conn.execute(sa.text("SELECT COUNT(*) FROM kuma_jobs")).scalar() or 0
+        if stranded:
+            raise RuntimeError(
+                "Schema conflict: both 'kuma_jobs' and 'kuma_tasks' tables exist "
+                f"and 'kuma_jobs' still has {stranded} row(s). Refusing to start so "
+                "rows aren't silently abandoned. Resolve manually."
+            )
+        with target_engine.connect() as conn:
+            conn.execute(sa.text("DROP TABLE kuma_jobs"))
+            conn.commit()
+        logger.info("Dropped empty legacy 'kuma_jobs' table left over from prior migration")
+        tables = set(sa.inspect(target_engine).get_table_names())
+
+    with target_engine.connect() as conn:
+        if "kuma_jobs" in tables and "kuma_tasks" not in tables:
+            conn.execute(sa.text("ALTER TABLE kuma_jobs RENAME TO kuma_tasks"))
+            conn.commit()
+
+        tables_after = set(sa.inspect(target_engine).get_table_names())
+        if "kuma_tasks" not in tables_after:
+            return  # fresh install — create_all will build the table
+
+        cols = {c["name"] for c in sa.inspect(target_engine).get_columns("kuma_tasks")}
+        if "job_type" in cols and "task_type" in cols:
+            raise RuntimeError(
+                "Schema conflict: kuma_tasks has both 'job_type' and 'task_type' columns. "
+                "Resolve manually."
+            )
+        if "job_type" in cols and "task_type" not in cols:
+            conn.execute(sa.text("ALTER TABLE kuma_tasks RENAME COLUMN job_type TO task_type"))
+            conn.commit()
+
+
 def _migrate_monitor_config(target_engine) -> None:
     """v0.3.0 migration: fold per-type HTTP fields into `config` JSON, drop legacy columns.
 
@@ -104,10 +153,15 @@ def _migrate_monitor_config(target_engine) -> None:
             except OperationalError as exc:
                 if _migration_already_applied(exc):
                     continue  # column already dropped
-                # Older SQLite without DROP COLUMN support reports this here;
-                # log and continue rather than crash, since the legacy columns
-                # being left behind is harmless (config is the live source).
-                logger.warning("Could not drop legacy column (%s): %s", ddl, exc)
+                msg = str(exc).lower()
+                if 'near "drop": syntax error' in msg:
+                    # SQLite < 3.35 doesn't support DROP COLUMN. Leaving the
+                    # legacy columns behind is harmless — `config` is the live
+                    # source of truth.
+                    logger.warning("SQLite lacks DROP COLUMN support (%s): %s", ddl, exc)
+                    continue
+                logger.error("Legacy column drop migration failed: %s — %s", ddl, exc)
+                raise
 
 
 @asynccontextmanager
@@ -115,24 +169,11 @@ async def lifespan(app: FastAPI):
     from .database import SessionLocal
     from .models import Monitor
 
-    # Rename legacy tables/columns before create_all so SQLAlchemy sees the new names
-    from sqlalchemy.exc import OperationalError
-    with engine.connect() as conn:
-        for ddl in [
-            "ALTER TABLE kuma_jobs RENAME TO kuma_tasks",
-            "ALTER TABLE kuma_tasks RENAME COLUMN job_type TO task_type",
-        ]:
-            try:
-                conn.execute(__import__("sqlalchemy").text(ddl))
-                conn.commit()
-            except OperationalError as exc:
-                if _migration_already_applied(exc):
-                    continue  # idempotent — table/column already renamed or doesn't exist yet
-                logger.error("Legacy rename migration failed: %s — %s", ddl, exc)
-                raise
+    _migrate_legacy_renames(engine)
 
     # Rename legacy task type strings — must not be silently swallowed on real errors
     # because _run() no longer handles the old names and would fail those tasks permanently.
+    from sqlalchemy.exc import OperationalError
     with engine.connect() as conn:
         for ddl in [
             "UPDATE kuma_tasks SET task_type = 'update_monitor' WHERE task_type = 'update'",

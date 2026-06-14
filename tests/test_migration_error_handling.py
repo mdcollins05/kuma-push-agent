@@ -72,3 +72,11 @@ def test_constraint_failure_is_not_benign():
 def test_empty_message_is_not_benign():
     """Conservative: an empty / opaque error doesn't match any known pattern → must raise."""
     assert _migration_already_applied(_op_err("")) is False
+
+
+def test_drop_column_syntax_error_is_not_benign():
+    """Older SQLite (< 3.35) lacks DROP COLUMN — the v0.3 migration loop handles
+    that specific message as a soft warning, NOT via the general classifier.
+    The classifier must still reject it so an unexpected occurrence elsewhere
+    surfaces."""
+    assert _migration_already_applied(_op_err('near "DROP": syntax error')) is False
