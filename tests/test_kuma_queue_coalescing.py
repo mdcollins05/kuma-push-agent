@@ -198,7 +198,9 @@ def test_create_tag_does_not_coalesce(client):
     """create_tag has no monitor_id, so it never coalesces — every call queues."""
     db = TestingSessionLocal()
     try:
-        before = db.query(KumaTask).filter(KumaTask.task_type == "create_tag").count()
+        before = db.query(KumaTask).filter(
+            KumaTask.task_type == "create_tag", KumaTask.status == "pending"
+        ).count()
         enqueue(db, "create_tag", {"name": "a", "color": "#fff"})
         enqueue(db, "create_tag", {"name": "b", "color": "#fff"})
         after = db.query(KumaTask).filter(
