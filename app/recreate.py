@@ -1,22 +1,22 @@
 """Shared logic for the 'Recreate Kuma monitor' action.
 
-Drops the cached Kuma sync state and reschedules the check job to fire
-immediately, so the checker provisions a fresh Kuma monitor and the
-sync_monitor task shows up in the banner within seconds rather than waiting
-up to `interval` seconds for the next tick.
+When the user clicks Recreate, the work splits into two steps that both
+happen on a worker thread so the async route handler never blocks:
 
-We deliberately do NOT probe Kuma to defend against the "user restored the
-monitor on Kuma between the last failed push and clicking Recreate" race —
-there is no read-only Kuma endpoint that can verify a push token's existence
-(the `/api/push/{token}` endpoint records a heartbeat as a side effect), so
-any probe would itself mutate Kuma state from a synchronous request handler.
+1. Verify the apparent kuma_missing state via a *read-only* Kuma API call
+   (Socket.IO `getMonitor`). This is the only way to confirm the monitor
+   is gone without writing — the push heartbeat endpoint mutates Kuma
+   state and so isn't safe to use as a probe.
 
-The flag this guards (`kuma_missing`) is set by checker.run_check() on push
-404 and cleared on push <400. The user only sees the Recreate banner when
-the flag is True, which means the most recent push round confirmed the
-monitor is gone. The race window where a user could click Recreate after a
-fast Kuma-side restore is bounded by one check interval and accepted as a
-known limitation.
+2. If verified missing → drop the cached kuma_monitor_id / push_token,
+   cancel queued tasks targeting the dead ID, and fire the check job
+   immediately so the sync_monitor task appears in the banner right away.
+   If verified still alive → just clear kuma_missing (the flag was
+   stale, no need to recreate). If the verify call itself fails →
+   leave state untouched so the user can retry.
+
+Callers must invoke verify_then_reset() via fastapi.concurrency.run_in_threadpool()
+because it performs blocking Socket.IO + DB work.
 """
 import logging
 
@@ -26,10 +26,63 @@ from .scheduler import add_check_job
 logger = logging.getLogger(__name__)
 
 
-def reset_and_reschedule(monitor, db) -> None:
-    """Clear the cached Kuma sync state, cancel queued tasks targeting the now-dead
-    kuma_monitor_id, and fire the check job immediately so the sync_monitor task
-    appears right away."""
+# Outcomes returned by verify_then_reset().
+OUTCOME_VERIFIED = "verified"       # Kuma still has the monitor — only cleared kuma_missing.
+OUTCOME_RECREATED = "recreated"     # Kuma confirms missing (or no way to verify) → full reset done.
+OUTCOME_UNREACHABLE = "unreachable" # Verify call failed (network/auth) — no state change.
+
+
+def verify_then_reset(monitor_id: int) -> str:
+    """Worker-side entry point. Opens its own DB session so it's safe to call
+    from a thread pool — never share a SQLAlchemy session across threads."""
+    from .database import SessionLocal
+    from .models import AppSettings, Monitor
+
+    db = SessionLocal()
+    try:
+        monitor = db.get(Monitor, monitor_id)
+        if not monitor:
+            return OUTCOME_UNREACHABLE
+        app_cfg = db.get(AppSettings, 1)
+
+        # No way to verify (Kuma not configured, or no kuma_monitor_id to look up)
+        # → fall back to the legacy "trust the kuma_missing flag, do a full reset"
+        # path. Without an upstream to ask, the user clicking the button is the
+        # best signal we have.
+        if not (app_cfg and app_cfg.kuma_url and monitor.kuma_monitor_id):
+            _reset_and_reschedule(monitor, db)
+            return OUTCOME_RECREATED
+
+        try:
+            from .kuma import monitor_exists
+            exists = monitor_exists(
+                monitor.kuma_monitor_id,
+                app_cfg.kuma_url, app_cfg.kuma_username, app_cfg.kuma_password,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Recreate verify for monitor %d failed (%s: %s) — leaving state untouched",
+                monitor_id, type(exc).__name__, exc,
+            )
+            return OUTCOME_UNREACHABLE
+
+        if exists:
+            if monitor.kuma_missing:
+                monitor.kuma_missing = False
+                db.commit()
+                logger.info(
+                    "Recreate: monitor %d still present on Kuma — cleared stale kuma_missing",
+                    monitor_id,
+                )
+            return OUTCOME_VERIFIED
+
+        _reset_and_reschedule(monitor, db)
+        return OUTCOME_RECREATED
+    finally:
+        db.close()
+
+
+def _reset_and_reschedule(monitor, db) -> None:
     cancel_monitor_tasks(db, monitor.id)
     monitor.kuma_monitor_id = None
     monitor.push_token = None

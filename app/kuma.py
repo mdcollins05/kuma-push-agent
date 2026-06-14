@@ -57,6 +57,27 @@ def create_push_monitor(
     return monitor_id
 
 
+def monitor_exists(
+    kuma_monitor_id: int,
+    kuma_url: str,
+    kuma_username: str,
+    kuma_password: str,
+) -> bool:
+    """Check whether a Kuma monitor still exists. Blocking — call via run_in_threadpool.
+    Returns True if found, False if Kuma reports it missing. Raises on connection/auth
+    errors so the caller can leave state untouched rather than wrongly resetting."""
+    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
+        api.login(kuma_username, kuma_password)
+        try:
+            api.get_monitor(kuma_monitor_id)
+            return True
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "does not exist" in msg or "not found" in msg:
+                return False
+            raise
+
+
 def get_push_token(
     kuma_monitor_id: int,
     kuma_url: str,

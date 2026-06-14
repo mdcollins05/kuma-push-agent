@@ -463,8 +463,8 @@ async def monitor_recreate_kuma(
 ):
     monitor = db.get(Monitor, monitor_id)
     if monitor and (monitor.kuma_monitor_id or monitor.kuma_synced):
-        from ..recreate import reset_and_reschedule
-        reset_and_reschedule(monitor, db)
+        from ..recreate import verify_then_reset
+        await run_in_threadpool(verify_then_reset, monitor_id)
     return RedirectResponse(f"/monitors/{monitor_id}/edit", status_code=302)
 
 
