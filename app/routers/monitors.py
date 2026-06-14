@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .. import kuma as kuma_module
 from ..dependencies import get_db, require_auth
 from ..models import AppSettings, KumaTask, Monitor
-from ..monitor_status import monitor_status_dict
+from ..monitor_status import monitor_status_dict, task_status_counts
 from ..scheduler import add_check_job, pause_check_job, remove_check_job, resume_check_job
 from ..templates import templates
 
@@ -126,19 +126,11 @@ async def monitor_statuses(
     db: Session = Depends(get_db),
     user: str = Depends(require_auth),
 ):
-    from sqlalchemy import func
     cfg = db.get(AppSettings, 1)
     tz = (cfg.timezone or "UTC") if cfg else "UTC"
     monitors = db.query(Monitor).all()
 
-    task_counts: dict[int, dict[str, int]] = {}
-    for monitor_id, status, count in (
-        db.query(KumaTask.monitor_id, KumaTask.status, func.count(KumaTask.id))
-        .filter(KumaTask.monitor_id.isnot(None), KumaTask.status.in_(["pending", "failed"]))
-        .group_by(KumaTask.monitor_id, KumaTask.status)
-        .all()
-    ):
-        task_counts.setdefault(monitor_id, {})[status] = count
+    task_counts = task_status_counts(db)
 
     pending_create_tag_ids = {
         monitor_id for (monitor_id,) in (
@@ -293,12 +285,7 @@ async def monitor_edit_get(
     notifications = _fetch_notifications()
     available_tags = _fetch_tags()
     groups = _fetch_groups()
-    task_counts = dict(
-        db.query(KumaTask.status, __import__("sqlalchemy").func.count(KumaTask.id))
-        .filter(KumaTask.monitor_id == monitor_id, KumaTask.status.in_(["pending", "failed"]))
-        .group_by(KumaTask.status)
-        .all()
-    )
+    task_counts = task_status_counts(db, [monitor_id]).get(monitor_id, {})
     pending_new_tags = []
     for task in (
         db.query(KumaTask)
