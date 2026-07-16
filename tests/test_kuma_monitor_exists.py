@@ -10,11 +10,21 @@ import pytest
 from app import kuma
 
 
+class _FakeSio:
+    """Stand-in for the socketio.Client that kuma_session configures and shuts down."""
+
+    reconnection = True
+
+    def shutdown(self):
+        return None
+
+
 class _FakeKumaApi:
     """Minimal stand-in for uptime_kuma_api.UptimeKumaApi used by monitor_exists."""
 
     def __init__(self, *, on_get_monitor):
         self._on_get_monitor = on_get_monitor
+        self.sio = _FakeSio()
 
     def __enter__(self):
         return self
