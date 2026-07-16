@@ -36,6 +36,16 @@ def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str):
             api.sio.shutdown()
         except Exception as exc:
             logger.warning("Kuma session shutdown failed: %s: %s", type(exc).__name__, exc)
+        # engineio's disconnect() closes the websocket but not the requests
+        # session it used for the polling handshake, so the kept-alive TCP
+        # connection to Kuma sits in CLOSE_WAIT until cyclic GC. Close it
+        # explicitly; the attribute is engineio-internal, hence the getattr.
+        http = getattr(getattr(api.sio, "eio", None), "http", None)
+        if http is not None:
+            try:
+                http.close()
+            except Exception as exc:
+                logger.warning("Kuma session HTTP pool close failed: %s: %s", type(exc).__name__, exc)
 
 
 def create_push_monitor(
