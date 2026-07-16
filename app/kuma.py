@@ -81,8 +81,7 @@ def monitor_exists(
     """Check whether a Kuma monitor still exists. Blocking — call via run_in_threadpool.
     Returns True if found, False if Kuma reports it missing. Raises on connection/auth
     errors so the caller can leave state untouched rather than wrongly resetting."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         try:
             api.get_monitor(kuma_monitor_id)
             return True
