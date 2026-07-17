@@ -36,16 +36,23 @@ def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str):
             api.sio.shutdown()
         except Exception as exc:
             logger.warning("Kuma session shutdown failed: %s: %s", type(exc).__name__, exc)
-        # engineio's disconnect() closes the websocket but not the requests
-        # session it used for the polling handshake, so the kept-alive TCP
-        # connection to Kuma sits in CLOSE_WAIT until cyclic GC. Close it
-        # explicitly; the attribute is engineio-internal, hence the getattr.
-        http = getattr(getattr(api.sio, "eio", None), "http", None)
-        if http is not None:
-            try:
-                http.close()
-            except Exception as exc:
-                logger.warning("Kuma session HTTP pool close failed: %s: %s", type(exc).__name__, exc)
+        # Don't trust shutdown() alone: it and engineio's disconnect() are
+        # gated on connection state and can bail or raise mid-teardown,
+        # stranding a live websocket whose read-loop thread keeps the
+        # connection (and the client object) alive forever. Close the
+        # transport resources unconditionally — closing an already-closed
+        # websocket or requests session is a no-op. The attributes are
+        # engineio-internal, hence the getattrs.
+        eio = getattr(api.sio, "eio", None)
+        state = getattr(eio, "state", "disconnected")
+        if state != "disconnected":
+            logger.warning("Kuma session still %r after shutdown — force-closing transport", state)
+        for resource in (getattr(eio, "ws", None), getattr(eio, "http", None)):
+            if resource is not None:
+                try:
+                    resource.close()
+                except Exception as exc:
+                    logger.warning("Kuma transport close failed: %s: %s", type(exc).__name__, exc)
 
 
 def create_push_monitor(
