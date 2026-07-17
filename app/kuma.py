@@ -14,12 +14,72 @@ logger = logging.getLogger(__name__)
 KUMA_TIMEOUT = 5
 
 
+def _close_transport(sio) -> None:
+    """Force-close a client's transport resources regardless of what the
+    socketio/engineio state machines think: both gate their own cleanup on
+    connection state and can strand a live websocket (whose read-loop thread
+    keeps the client alive) or the polling requests.Session. Closing an
+    already-closed resource is a no-op. The attributes are engineio-internal,
+    hence the getattrs."""
+    eio = getattr(sio, "eio", None)
+    for resource in (getattr(eio, "ws", None), getattr(eio, "http", None)):
+        if resource is not None:
+            try:
+                resource.close()
+            except Exception as exc:
+                logger.warning("Kuma transport close failed: %s: %s", type(exc).__name__, exc)
+
+
+# UptimeKumaApi.__init__ calls connect() before the caller can obtain a
+# reference, so a handshake that fails partway ("unable to connect") strands
+# a partially-connected client no caller-side teardown can reach — observed
+# in production as ~0.5 leaked threads+sockets per hour, matching the
+# "unable to connect" count in the logs. Wrap connect() so its failures
+# clean up after themselves.
+_orig_connect = UptimeKumaApi.connect
+
+
+def _connect_with_cleanup(self):
+    try:
+        _orig_connect(self)
+    except Exception:
+        try:
+            self.sio.shutdown()
+        except Exception as exc:
+            logger.warning("Kuma post-connect-failure shutdown failed: %s: %s", type(exc).__name__, exc)
+        _close_transport(self.sio)
+        raise
+
+
+UptimeKumaApi.connect = _connect_with_cleanup
+
+
 @contextmanager
 def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str):
-    """Open a single authenticated Kuma connection for multiple operations."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
+    """Open a single authenticated Kuma connection for multiple operations.
+
+    Auto-reconnection is disabled and teardown goes through sio.shutdown()
+    rather than the library's disconnect(): disconnect() is a no-op once the
+    connection has already dropped (e.g. after a timeout), which leaves
+    python-socketio's reconnect thread alive. Each abandoned client then
+    reconnects on its own and buffers Kuma's heartbeat broadcasts forever —
+    a thread and memory leak. shutdown() also aborts an in-progress
+    reconnect attempt.
+    """
+    api = UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT)
+    api.sio.reconnection = False
+    try:
         api.login(kuma_username, kuma_password)
         yield api
+    finally:
+        try:
+            api.sio.shutdown()
+        except Exception as exc:
+            logger.warning("Kuma session shutdown failed: %s: %s", type(exc).__name__, exc)
+        state = getattr(getattr(api.sio, "eio", None), "state", "disconnected")
+        if state != "disconnected":
+            logger.warning("Kuma session still %r after shutdown — force-closing transport", state)
+        _close_transport(api.sio)
 
 
 def create_push_monitor(
@@ -34,8 +94,7 @@ def create_push_monitor(
     """Create a Push monitor in Kuma. Blocking — call via run_in_threadpool.
     Returns kuma_monitor_id only. Call get_push_token_and_apply_tags() to retrieve token and apply tags.
     """
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         kwargs = {}
         if notification_ids:
             kwargs["notificationIDList"] = {str(nid): True for nid in notification_ids}
@@ -84,8 +143,7 @@ def get_push_token(
     kuma_password: str,
 ) -> str:
     """Fetch the push token for an existing Kuma Push monitor. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         monitor_data = api.get_monitor(kuma_monitor_id)
 
     push_token = monitor_data.get("pushToken") or monitor_data.get("push_token", "")
@@ -102,8 +160,7 @@ def get_push_token_and_apply_tags(
     kuma_password: str,
 ) -> str:
     """Fetch the push token and apply tag associations in a single connection. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         monitor_data = api.get_monitor(kuma_monitor_id)
         push_token = monitor_data.get("pushToken") or monitor_data.get("push_token", "")
         if not push_token:
@@ -124,8 +181,7 @@ def update_monitor(
     **kwargs,
 ) -> None:
     """Update fields on an existing Kuma monitor. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.edit_monitor(kuma_monitor_id, **kwargs)
 
 
@@ -136,8 +192,7 @@ def pause_monitor(
     kuma_password: str,
 ) -> None:
     """Pause a monitor in Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.pause_monitor(kuma_monitor_id)
 
 
@@ -148,8 +203,7 @@ def resume_monitor(
     kuma_password: str,
 ) -> None:
     """Resume a paused monitor in Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.resume_monitor(kuma_monitor_id)
 
 
@@ -160,8 +214,7 @@ def delete_monitor(
     kuma_password: str,
 ) -> None:
     """Delete a monitor from Kuma. Blocking — call via run_in_threadpool."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.delete_monitor(kuma_monitor_id)
 
 
@@ -171,8 +224,7 @@ def get_notifications(
     kuma_password: str,
 ) -> list[dict]:
     """Fetch all notification channels from Kuma. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         return api.get_notifications()
 
 
@@ -182,8 +234,7 @@ def get_tags(
     kuma_password: str,
 ) -> list[dict]:
     """Fetch all tags from Kuma. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         return api.get_tags()
 
 
@@ -193,8 +244,7 @@ def get_groups(
     kuma_password: str,
 ) -> list[dict]:
     """Fetch all group-type monitors from Kuma. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         monitors = api.get_monitors()
     return [
         {"kuma_id": m["id"], "name": m["name"]}
@@ -211,8 +261,7 @@ def create_tag(
     kuma_password: str,
 ) -> dict:
     """Create a new tag in Kuma. Returns the created tag dict (includes `id`). Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         return api.add_tag(name=name, color=color)
 
 
@@ -224,8 +273,7 @@ def add_monitor_tag(
     kuma_password: str,
 ) -> None:
     """Associate a tag with a Kuma monitor. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.add_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
 
 
@@ -237,8 +285,7 @@ def delete_monitor_tag(
     kuma_password: str,
 ) -> None:
     """Remove a tag from a Kuma monitor. Blocking."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password) as api:
         api.delete_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
 
 
@@ -248,8 +295,8 @@ def test_connection(
     kuma_password: str,
 ) -> None:
     """Test Kuma connectivity and credentials. Blocking — raises on failure."""
-    with UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT) as api:
-        api.login(kuma_username, kuma_password)
+    with kuma_session(kuma_url, kuma_username, kuma_password):
+        pass
 
 
 def build_push_url(
