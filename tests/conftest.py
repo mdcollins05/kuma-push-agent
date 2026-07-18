@@ -49,6 +49,13 @@ def client():
     db.commit()
     db.close()
 
+    # Route app.database.SessionLocal at the test factory so any worker code
+    # that opens its own session (e.g. verify_then_reset in a threadpool) lands
+    # in the same in-memory DB as the route handler.
+    import app.database as _database_mod
+    _saved_sessionlocal = _database_mod.SessionLocal
+    _database_mod.SessionLocal = TestingSessionLocal
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[require_api_key] = override_require_api_key
     app.dependency_overrides[require_auth] = override_require_auth
@@ -57,6 +64,7 @@ def client():
         yield c
 
     app.dependency_overrides.clear()
+    _database_mod.SessionLocal = _saved_sessionlocal
 
 
 HEADERS = {"X-API-Key": "test-key"}

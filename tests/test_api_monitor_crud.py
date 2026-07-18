@@ -423,6 +423,39 @@ def test_recreate_kuma_clears_sync_state(client):
         _delete_monitor_direct(mid)
 
 
+def test_recreate_kuma_reschedules_immediate_check(client, monkeypatch):
+    """Recreate must fire add_check_job() so the checker creates the sync_monitor
+    task right away — otherwise the sync banner stays empty for up to `interval`
+    seconds while waiting for the next scheduled tick."""
+    db = TestingSessionLocal()
+    try:
+        m = Monitor(
+            name="Recreate Reschedule", interval=60,
+            config=_config_only("https://reschedule.example.com"),
+            kuma_monitor_id=99, push_token="t",
+            kuma_synced=True, enabled=True,
+        )
+        db.add(m)
+        db.commit()
+        mid = m.id
+    finally:
+        db.close()
+
+    calls: list[tuple[int, int]] = []
+
+    def fake_add_check_job(monitor_id, interval, last_check_time=None):
+        calls.append((monitor_id, interval))
+
+    monkeypatch.setattr("app.recreate.add_check_job", fake_add_check_job)
+
+    try:
+        resp = client.post(f"/api/v1/monitors/{mid}/recreate-kuma", headers=HEADERS)
+        assert resp.status_code == 200, resp.text
+        assert (mid, 60) in calls, "add_check_job should be called to fire an immediate check"
+    finally:
+        _delete_monitor_direct(mid)
+
+
 def test_recreate_kuma_cancels_pending_tasks(client):
     """Recreate cancels queued KumaTasks so they don't retry against the stale kuma_monitor_id."""
     from app.models import KumaTask

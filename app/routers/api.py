@@ -2,6 +2,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, require_api_key
@@ -355,7 +356,7 @@ def update_monitor(monitor_id: int, payload: MonitorUpdate, db: Session = Depend
         409: {"description": "Monitor has never been synced — nothing to recreate"},
     },
 )
-def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
+async def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
     monitor = db.get(Monitor, monitor_id)
     if not monitor:
         raise HTTPException(status_code=404, detail="Monitor not found")
@@ -364,15 +365,11 @@ def recreate_kuma_monitor(monitor_id: int, db: Session = Depends(get_db)):
             status_code=409,
             detail="Monitor has never been synced with Uptime Kuma — nothing to recreate",
         )
-    # Drop queued tasks that target the now-dead kuma_monitor_id — otherwise
-    # they'd keep retrying against a stale ID after the fresh provision lands.
-    from ..kuma_queue import cancel_monitor_tasks
-    cancel_monitor_tasks(db, monitor_id)
-    monitor.kuma_monitor_id = None
-    monitor.push_token = None
-    monitor.kuma_synced = False
-    monitor.kuma_missing = False
-    db.commit()
+    # verify_then_reset opens its own DB session and runs the blocking Socket.IO
+    # `getMonitor` read; offload to a thread pool so this async handler doesn't
+    # pin the event loop while Kuma responds (or times out).
+    from ..recreate import verify_then_reset
+    await run_in_threadpool(verify_then_reset, monitor_id)
     db.refresh(monitor)
     return _to_response(monitor)
 
