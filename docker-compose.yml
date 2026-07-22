@@ -3,12 +3,16 @@ services:
     build:
       context: .
       target: test
+      args:
+        VERSION: ${VERSION:-0.0.0+unknown}
     profiles: ["test"]
 
   kuma-push-agent:
     build:
       context: .
       target: production
+      args:
+        VERSION: ${VERSION:-0.0.0+unknown}
     container_name: kuma-push-agent
     volumes:
       - agent_data:/data

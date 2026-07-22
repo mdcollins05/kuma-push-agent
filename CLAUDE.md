@@ -88,11 +88,20 @@ DATA_DIR=./data CONFIG_DIR=./config uv run uvicorn app.main:app --reload --port 
 # Build and run in Docker
 docker compose up --build
 
+# Build and run with a real version string (derived from git tag + short SHA)
+make up                 # == VERSION=<tag>+<sha> docker compose up --build -d
+make test               # same, for the test profile
+
 # Rebuild after dep changes
 uv add <package>        # updates pyproject.toml
 uv sync                 # regenerates uv.lock
 docker compose build    # picks up new lock
 ```
+
+Plain `docker compose up --build` bakes `VERSION=0.0.0+unknown` into the image
+(shown in logs + navbar tooltip). `make up` / `make test` derive a meaningful
+`VERSION` from `git describe --tags` + short SHA and pass it as the `VERSION`
+build-arg. CI still passes `VERSION` from the git tag on release builds.
 
 **Templates are baked into the Docker image — there is no live reload in the container.** Every change to `app/` (templates, routers, models, etc.) requires a full rebuild: `docker compose up --build -d`.
 
