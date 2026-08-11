@@ -545,3 +545,57 @@ def test_monitor_response_includes_kuma_missing(client):
         assert got.json()["kuma_missing"] is False
     finally:
         client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
+
+
+# ── DNS check type ─────────────────────────────────────────────────────────────
+
+def _dns_payload(name: str, **config_extra) -> dict:
+    config = {"type": "dns", "dns_query": "example.com", **config_extra}
+    return {"name": name, "interval": 60, "config": config}
+
+
+def test_create_dns_monitor_round_trips(client):
+    payload = _dns_payload(
+        "DNS RT", dns_record_type="AAAA", dns_resolver="1.1.1.1",
+        expected_value="203.0.113.5",
+    )
+    resp = client.post("/api/v1/monitors", json=payload, headers=HEADERS)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    mid = body["id"]
+    try:
+        cfg = body["config"]
+        assert cfg["type"] == "dns"
+        assert cfg["dns_query"] == "example.com"
+        assert cfg["dns_record_type"] == "AAAA"
+        assert cfg["dns_resolver"] == "1.1.1.1"
+        assert cfg["expected_value"] == "203.0.113.5"
+    finally:
+        client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
+
+
+def test_create_dns_monitor_defaults(client):
+    resp = client.post("/api/v1/monitors", json=_dns_payload("DNS Defaults"), headers=HEADERS)
+    assert resp.status_code == 201, resp.text
+    mid = resp.json()["id"]
+    try:
+        cfg = resp.json()["config"]
+        assert cfg["dns_record_type"] == "A"
+        assert cfg["dns_resolver"] is None
+        assert cfg["expected_value"] is None
+    finally:
+        client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
+
+
+def test_dns_blank_query_rejected(client):
+    resp = client.post("/api/v1/monitors", json=_dns_payload("DNS Blank", dns_query="  "), headers=HEADERS)
+    assert resp.status_code == 422
+
+
+def test_dns_invalid_resolver_rejected(client):
+    resp = client.post(
+        "/api/v1/monitors",
+        json=_dns_payload("DNS Bad Resolver", dns_resolver="not-an-ip"),
+        headers=HEADERS,
+    )
+    assert resp.status_code == 422

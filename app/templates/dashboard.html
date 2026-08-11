@@ -59,12 +59,18 @@
         </td>
         <td class="fw-semibold">{{ m.name }}</td>
         <td class="text-muted small">
-          {% set cfg_url = (m.config or {}).get('url', '') %}
+          {% set cfg = m.config or {} %}
+          {% if cfg.get('type') == 'dns' %}
+          <span class="badge bg-secondary me-1">DNS {{ cfg.get('dns_record_type', 'A') }}</span>
+          {{ cfg.get('dns_query', '') }}
+          {% else %}
+          {% set cfg_url = cfg.get('url', '') %}
           {% if cfg_url %}
           <a href="{{ cfg_url }}" target="_blank" rel="noopener" class="text-muted text-decoration-none">
             {{ cfg_url }}
           </a>
           {% else %}—{% endif %}
+          {% endif %}
         </td>
         <td class="small" data-field="response">
           {% if m.last_response_ms is not none %}

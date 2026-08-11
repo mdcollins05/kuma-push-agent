@@ -39,6 +39,44 @@ def _check_http(config: dict) -> tuple[str, str, int]:
         return "down", str(exc)[:200], elapsed_ms
 
 
+def _check_dns(config: dict) -> tuple[str, str, int]:
+    """Run a DNS check and return (status, message, elapsed_ms)."""
+    import dns.resolver
+
+    query = config.get("dns_query") or ""
+    record_type = config.get("dns_record_type") or "A"
+    custom_resolver = config.get("dns_resolver")
+    expected = config.get("expected_value")
+    max_response_ms = config.get("max_response_ms")
+
+    resolver = dns.resolver.Resolver()
+    if custom_resolver:
+        resolver.nameservers = [custom_resolver]
+    resolver.timeout = 10.0
+    resolver.lifetime = 10.0
+
+    start = time.monotonic()
+    try:
+        answers = resolver.resolve(query, record_type)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        values = [r.to_text() for r in answers]
+
+        if expected and expected not in values:
+            return "down", f"Expected {expected}, got {', '.join(values) or 'no records'}", elapsed_ms
+        if max_response_ms is not None and elapsed_ms > max_response_ms:
+            return "down", f"Lookup time {elapsed_ms} ms exceeded limit of {max_response_ms} ms", elapsed_ms
+        return "up", f"Resolved {', '.join(values)}", elapsed_ms
+    except dns.resolver.NXDOMAIN:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return "down", f"NXDOMAIN — {query} does not exist", elapsed_ms
+    except dns.resolver.NoAnswer:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return "down", f"No {record_type} records for {query}", elapsed_ms
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return "down", str(exc)[:200], elapsed_ms
+
+
 def run_check(monitor_id: int) -> None:
     """Health-check one monitor and push the result to Kuma. Runs in a thread pool."""
     from .database import SessionLocal
@@ -58,6 +96,8 @@ def run_check(monitor_id: int) -> None:
 
         if check_type == "http":
             status, msg, elapsed_ms = _check_http(config)
+        elif check_type == "dns":
+            status, msg, elapsed_ms = _check_dns(config)
         else:
             status, msg, elapsed_ms = "down", f"Unsupported check type: {check_type}", 0
 

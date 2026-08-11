@@ -10,6 +10,7 @@ Dockerized Python/FastAPI web app that acts as a remote health-check agent for U
 - **SQLAlchemy 2.0** (sync) + **SQLite** at `/data/kuma_push_agent.db`
 - **APScheduler** `BackgroundScheduler` + `ThreadPoolExecutor` — one job per monitor
 - **httpx** (sync) for URL health checks and Kuma push heartbeats
+- **dnspython** (sync) for DNS check-type lookups
 - **uptime-kuma-api-v2** (sync Socket.IO) for Kuma monitor management
 - **Jinja2** + Bootstrap 5 CDN for server-rendered UI
 - **passlib[bcrypt]** for password hashing
@@ -43,6 +44,9 @@ app/
 ```
 
 ## Key Architecture Decisions
+
+### Check types live in the `config` JSON, not a column
+`Monitor.config` is a JSON blob with a `type` discriminator (`http`, `dns`). `checker.py:run_check()` dispatches on it (`_check_http`, `_check_dns`); `schemas.py:CheckConfig` is a Pydantic discriminated union. Adding a check type = new `*Config` schema + `_check_*` probe + `_build_*_config` in `routers/monitors.py` + a field block in `monitor_form.html` (JS `applyCheckType` shows one block and `disabled`-toggles the rest so hidden inputs don't submit/block validation). No DB migration needed. All types still sync to Kuma as Push monitors — the agent probes locally and pushes the result.
 
 ### uptime-kuma-api-v2 is blocking (sync Socket.IO)
 Every call — `login()`, `add_monitor()`, `get_monitor()`, `pause_monitor()`, `delete_monitor()` — blocks the calling thread. **Never call from async context directly.** Always use `fastapi.concurrency.run_in_threadpool()` in route handlers, or call from within a threadpool APScheduler job.
