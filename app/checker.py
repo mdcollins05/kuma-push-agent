@@ -49,14 +49,16 @@ def _check_dns(config: dict) -> tuple[str, str, int]:
     expected = config.get("expected_value")
     max_response_ms = config.get("max_response_ms")
 
-    resolver = dns.resolver.Resolver()
-    if custom_resolver:
-        resolver.nameservers = [custom_resolver]
-    resolver.timeout = 10.0
-    resolver.lifetime = 10.0
-
     start = time.monotonic()
     try:
+        # Construct inside the try: Resolver() reads system resolv.conf and can
+        # raise NoResolverConfiguration. Skip that read entirely when a custom
+        # resolver is set (configure=False) — we supply the nameserver ourselves.
+        resolver = dns.resolver.Resolver(configure=not custom_resolver)
+        if custom_resolver:
+            resolver.nameservers = [custom_resolver]
+        resolver.timeout = 10.0
+        resolver.lifetime = 10.0
         answers = resolver.resolve(query, record_type)
         elapsed_ms = int((time.monotonic() - start) * 1000)
         values = [r.to_text() for r in answers]

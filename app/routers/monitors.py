@@ -93,6 +93,8 @@ def _build_dns_config(
             ipaddress.ip_address(resolver)
         except ValueError:
             return None, "DNS resolver must be a valid IP address"
+    if max_response_ms is not None and max_response_ms <= 0:
+        return None, "max_response_ms must be greater than 0"
     return {
         "type": "dns",
         "dns_query": query,

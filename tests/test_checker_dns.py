@@ -19,7 +19,7 @@ class _Rec:
 def _stub_resolver(monkeypatch, *, answers=None, exc=None):
     """Patch dns.resolver.Resolver so resolve() returns `answers` or raises `exc`."""
     class StubResolver:
-        def __init__(self):
+        def __init__(self, configure=True):
             self.nameservers = []
             self.timeout = None
             self.lifetime = None
@@ -86,7 +86,8 @@ def test_custom_resolver_applied(monkeypatch):
     seen = {}
 
     class StubResolver:
-        def __init__(self):
+        def __init__(self, configure=True):
+            seen["configure"] = configure
             self.nameservers = []
             self.timeout = None
             self.lifetime = None
@@ -99,3 +100,18 @@ def test_custom_resolver_applied(monkeypatch):
     status, _, _ = _check_dns(_cfg(dns_resolver="1.1.1.1"))
     assert status == "up"
     assert seen["nameservers"] == ["1.1.1.1"]
+    # custom resolver must skip system resolv.conf read
+    assert seen["configure"] is False
+
+
+def test_no_resolver_configuration_down(monkeypatch):
+    """A broken/absent system resolv.conf raises at construction — must be
+    caught and reported DOWN, not propagated out of _check_dns."""
+    class BrokenResolver:
+        def __init__(self, configure=True):
+            raise dns.resolver.NoResolverConfiguration("no nameservers")
+
+    monkeypatch.setattr(dns.resolver, "Resolver", BrokenResolver)
+    status, msg, _ = _check_dns(_cfg())
+    assert status == "down"
+    assert msg

@@ -599,3 +599,29 @@ def test_dns_invalid_resolver_rejected(client):
         headers=HEADERS,
     )
     assert resp.status_code == 422
+
+
+def _dns_form(**overrides) -> dict:
+    """Minimal form-post body for POST /monitors/new with a DNS check type."""
+    data = {
+        "name": "DNS Form",
+        "check_type": "dns",
+        "dns_query": "example.com",
+        "dns_record_type": "A",
+        "interval": "60",
+    }
+    data.update(overrides)
+    return data
+
+
+@pytest.mark.parametrize("bad", ["0", "-1"])
+def test_dns_form_rejects_non_positive_max_response(client, bad):
+    """The form path bypasses DnsConfig, so _build_dns_config must reject
+    max_response_ms <= 0 itself (re-renders with a 400, creates nothing)."""
+    resp = client.post(
+        "/monitors/new",
+        data=_dns_form(name=f"DNS Bad Max {bad}", max_response_ms=bad),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 400
+    assert "greater than 0" in resp.text
