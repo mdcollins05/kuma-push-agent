@@ -12,8 +12,8 @@ export VERSION
 
 # Build + start the agent in the background with the derived version.
 up:
-	VERSION=$(VERSION) docker compose up --build -d
+	docker compose up --build -d
 
 # Run the test suite with the same derived version.
 test:
-	VERSION=$(VERSION) docker compose --profile test run --rm test
+	docker compose --profile test run --rm test
