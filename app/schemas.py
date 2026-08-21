@@ -1,4 +1,4 @@
-from typing import Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -79,9 +79,65 @@ class HttpConfig(BaseModel):
         return v
 
 
+class DnsConfig(BaseModel):
+    """DNS check configuration. Resolves a name and marks UP when an answer is
+    returned (optionally matching an expected value)."""
+    type: Literal["dns"] = Field("dns", description="Check type discriminator")
+    dns_query: str = Field(..., description="Name to resolve", examples=["example.com"])
+    dns_record_type: Literal["A", "AAAA"] = Field(
+        "A", description="DNS record type to query"
+    )
+    dns_resolver: Optional[str] = Field(
+        None,
+        description="Nameserver IP to query, e.g. 1.1.1.1 — omit to use the system resolver",
+        examples=["1.1.1.1"],
+    )
+    expected_value: Optional[str] = Field(
+        None,
+        description="If set, mark DOWN unless a returned record equals this value exactly",
+        examples=["203.0.113.5"],
+    )
+    max_response_ms: Optional[int] = Field(
+        None, description="Mark DOWN if the lookup takes longer than this many milliseconds"
+    )
+
+    @field_validator("dns_query")
+    @classmethod
+    def query_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("dns_query must not be blank")
+        return v.strip()
+
+    @field_validator("dns_resolver")
+    @classmethod
+    def resolver_valid_ip(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        if not v:
+            return None
+        import ipaddress
+        try:
+            ipaddress.ip_address(v)
+        except ValueError:
+            raise ValueError("dns_resolver must be a valid IP address")
+        return v
+
+    @field_validator("expected_value")
+    @classmethod
+    def expected_optional(cls, v: Optional[str]) -> Optional[str]:
+        v = (v or "").strip()
+        return v or None
+
+    @field_validator("max_response_ms")
+    @classmethod
+    def max_response_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("max_response_ms must be greater than 0")
+        return v
+
+
 # Discriminated union of check configurations.
-# Future: Annotated[Union[HttpConfig, TcpConfig, DnsConfig, PingConfig], Field(discriminator="type")]
-CheckConfig = HttpConfig
+# Future: add TcpConfig, PingConfig to the union.
+CheckConfig = Annotated[Union[HttpConfig, DnsConfig], Field(discriminator="type")]
 
 
 class MonitorCreate(BaseModel):

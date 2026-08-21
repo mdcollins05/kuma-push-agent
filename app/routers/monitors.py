@@ -72,6 +72,39 @@ def _build_http_config(
     }, None
 
 
+VALID_DNS_RECORD_TYPES = {"A", "AAAA"}
+
+
+def _build_dns_config(
+    dns_query: str, dns_record_type: str, dns_resolver: Optional[str],
+    expected_value: Optional[str], max_response_ms: Optional[int],
+) -> tuple[dict | None, str | None]:
+    """Assemble the DNS config dict from form fields. Returns (config, error_msg)."""
+    query = (dns_query or "").strip()
+    if not query:
+        return None, "DNS query name must not be blank"
+    record_type = (dns_record_type or "A").upper()
+    if record_type not in VALID_DNS_RECORD_TYPES:
+        return None, f"Unsupported DNS record type: {record_type}"
+    resolver = (dns_resolver or "").strip() or None
+    if resolver:
+        import ipaddress
+        try:
+            ipaddress.ip_address(resolver)
+        except ValueError:
+            return None, "DNS resolver must be a valid IP address"
+    if max_response_ms is not None and max_response_ms <= 0:
+        return None, "max_response_ms must be greater than 0"
+    return {
+        "type": "dns",
+        "dns_query": query,
+        "dns_record_type": record_type,
+        "dns_resolver": resolver,
+        "expected_value": (expected_value or "").strip() or None,
+        "max_response_ms": max_response_ms,
+    }, None
+
+
 def _kuma_creds(db: Session):
     s = db.get(AppSettings, 1)
     if s and s.configured:
@@ -195,7 +228,8 @@ async def monitor_new_get(
 async def monitor_new_post(
     request: Request,
     name: str = Form(...),
-    url: str = Form(...),
+    check_type: str = Form("http"),
+    url: str = Form(""),
     interval: int = Form(60),
     method: str = Form("GET"),
     headers_json: str = Form(""),
@@ -203,6 +237,10 @@ async def monitor_new_post(
     expected_codes_raw: str = Form("200"),
     keyword: Optional[str] = Form(None),
     max_response_ms: Optional[int] = Form(None),
+    dns_query: str = Form(""),
+    dns_record_type: str = Form("A"),
+    dns_resolver: Optional[str] = Form(None),
+    expected_value: Optional[str] = Form(None),
     notification_ids: List[int] = Form(default=[]),
     tag_ids: List[int] = Form(default=[]),
     new_tag_names: List[str] = Form(default=[]),
@@ -227,6 +265,9 @@ async def monitor_new_post(
                  "headers_json": headers_json, "body": body,
                  "expected_codes_raw": expected_codes_raw, "keyword": keyword,
                  "max_response_ms": max_response_ms, "verify_ssl": verify_ssl is not None,
+                 "check_type": check_type,
+                 "dns_query": dns_query, "dns_record_type": dns_record_type,
+                 "dns_resolver": dns_resolver, "expected_value": expected_value,
                  "kuma_group_id": kuma_group_id,
              }},
             status_code=status,
@@ -235,11 +276,20 @@ async def monitor_new_post(
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
 
-    config, err = _build_http_config(
-        url=url, method=method, headers_json=headers_json, body=body,
-        expected_codes_raw=expected_codes_raw, keyword=keyword,
-        max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
-    )
+    if check_type == "dns":
+        config, err = _build_dns_config(
+            dns_query=dns_query, dns_record_type=dns_record_type,
+            dns_resolver=dns_resolver, expected_value=expected_value,
+            max_response_ms=max_response_ms,
+        )
+    else:
+        if not (url or "").strip():
+            return _error("URL must not be blank.")
+        config, err = _build_http_config(
+            url=url, method=method, headers_json=headers_json, body=body,
+            expected_codes_raw=expected_codes_raw, keyword=keyword,
+            max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
+        )
     if err:
         return _error(err)
 
@@ -318,7 +368,8 @@ async def monitor_edit_post(
     monitor_id: int,
     request: Request,
     name: str = Form(...),
-    url: str = Form(...),
+    check_type: str = Form("http"),
+    url: str = Form(""),
     interval: int = Form(60),
     method: str = Form("GET"),
     headers_json: str = Form(""),
@@ -326,6 +377,10 @@ async def monitor_edit_post(
     expected_codes_raw: str = Form("200"),
     keyword: Optional[str] = Form(None),
     max_response_ms: Optional[int] = Form(None),
+    dns_query: str = Form(""),
+    dns_record_type: str = Form("A"),
+    dns_resolver: Optional[str] = Form(None),
+    expected_value: Optional[str] = Form(None),
     notification_ids: List[int] = Form(default=[]),
     tag_ids: List[int] = Form(default=[]),
     new_tag_names: List[str] = Form(default=[]),
@@ -357,6 +412,9 @@ async def monitor_edit_post(
                  "headers_json": headers_json, "body": body,
                  "expected_codes_raw": expected_codes_raw, "keyword": keyword,
                  "max_response_ms": max_response_ms, "verify_ssl": verify_ssl is not None,
+                 "check_type": check_type,
+                 "dns_query": dns_query, "dns_record_type": dns_record_type,
+                 "dns_resolver": dns_resolver, "expected_value": expected_value,
                  "kuma_group_id": kuma_group_id,
              }},
             status_code=status,
@@ -365,11 +423,20 @@ async def monitor_edit_post(
     if interval < 20:
         return _error("Interval must be at least 20 seconds.")
 
-    config, err = _build_http_config(
-        url=url, method=method, headers_json=headers_json, body=body,
-        expected_codes_raw=expected_codes_raw, keyword=keyword,
-        max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
-    )
+    if check_type == "dns":
+        config, err = _build_dns_config(
+            dns_query=dns_query, dns_record_type=dns_record_type,
+            dns_resolver=dns_resolver, expected_value=expected_value,
+            max_response_ms=max_response_ms,
+        )
+    else:
+        if not (url or "").strip():
+            return _error("URL must not be blank.")
+        config, err = _build_http_config(
+            url=url, method=method, headers_json=headers_json, body=body,
+            expected_codes_raw=expected_codes_raw, keyword=keyword,
+            max_response_ms=max_response_ms, verify_ssl_flag=verify_ssl,
+        )
     if err:
         return _error(err)
 

@@ -83,36 +83,126 @@
                  value="{{ fv.get('name') if fv.get('name') else (monitor.name if monitor else '') }}"
                  placeholder="My Service" required>
         </div>
+        {% set type_val = fv.get('check_type') or cfg.get('type', 'http') %}
         <div class="mb-3">
-          <label class="form-label fw-semibold">URL</label>
-          <input type="url" name="url" class="form-control"
-                 value="{{ fv.get('url') if fv.get('url') else cfg.get('url', '') }}"
-                 placeholder="https://example.com" required>
-          <div class="form-check mt-2">
-            {% if fv %}
-              {% set verify_checked = fv.get('verify_ssl') %}
-            {% elif monitor %}
-              {% set verify_checked = cfg.get('verify_ssl', True) %}
-            {% else %}
-              {% set verify_checked = True %}
-            {% endif %}
-            <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" value="true"
-              {{ 'checked' if verify_checked else '' }}>
-            <label class="form-check-label" for="verify_ssl">Verify SSL certificate</label>
+          <label class="form-label fw-semibold">Check Type</label>
+          <select name="check_type" id="check_type" class="form-select" onchange="applyCheckType(this.value)">
+            <option value="http" {% if type_val == 'http' %}selected{% endif %}>HTTP(S)</option>
+            <option value="dns" {% if type_val == 'dns' %}selected{% endif %}>DNS</option>
+          </select>
+        </div>
+
+        <!-- ── HTTP fields ── -->
+        <div data-check-block="http">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">URL</label>
+            <input type="url" name="url" class="form-control"
+                   value="{{ fv.get('url') if fv.get('url') else cfg.get('url', '') }}"
+                   placeholder="https://example.com" required>
+            <div class="form-check mt-2">
+              {% if fv %}
+                {% set verify_checked = fv.get('verify_ssl') %}
+              {% elif monitor %}
+                {% set verify_checked = cfg.get('verify_ssl', True) %}
+              {% else %}
+                {% set verify_checked = True %}
+              {% endif %}
+              <input class="form-check-input" type="checkbox" name="verify_ssl" id="verify_ssl" value="true"
+                {{ 'checked' if verify_checked else '' }}>
+              <label class="form-check-label" for="verify_ssl">Verify SSL certificate</label>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Expected Status Codes</label>
+            <input type="text" name="expected_codes_raw" class="form-control"
+              value="{{ fv.get('expected_codes_raw') if fv.get('expected_codes_raw') else ((cfg.get('expected_codes') or [200]) | join(', ') if monitor else '200') }}"
+              placeholder="200, 201">
+            {% if not monitor %}<div class="form-text">Comma-separated list of acceptable HTTP status codes.</div>{% endif %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Keyword (optional)</label>
+            <input type="text" name="keyword" class="form-control"
+                   value="{{ fv.get('keyword') if fv.get('keyword') else (cfg.get('keyword') or '' if monitor else '') }}"
+                   placeholder="ok">
+            {% if not monitor %}<div class="form-text">Response body must contain this string to be considered UP.</div>{% endif %}
+          </div>
+          {% set method_val = fv.get('method') or cfg.get('method', 'GET') %}
+          {% set headers_val = fv.get('headers_json') if fv.get('headers_json') else (cfg.get('headers') | tojson if cfg.get('headers') else '') %}
+          {% set body_val = fv.get('body') if fv.get('body') else (cfg.get('body') or '') %}
+          {% set advanced_open = method_val != 'GET' or headers_val or body_val %}
+          <div class="mb-3">
+            <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#advanced-http"
+                    aria-expanded="{{ 'true' if advanced_open else 'false' }}" aria-controls="advanced-http">
+              <i class="bi bi-chevron-{{ 'down' if advanced_open else 'right' }}" id="advanced-chevron"></i> Advanced HTTP options
+            </button>
+            <div class="collapse {{ 'show' if advanced_open else '' }}" id="advanced-http">
+              <div class="border rounded p-3 mt-2">
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">HTTP Method</label>
+                  <select name="method" class="form-select form-select-sm">
+                    {% for m in ['GET','POST','PUT','PATCH','DELETE','HEAD'] %}
+                    <option value="{{ m }}" {% if method_val == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">Request Headers (JSON object)</label>
+                  <textarea name="headers_json" class="form-control font-monospace" rows="3"
+                            placeholder='{"Authorization": "Bearer xxx"}'>{{ headers_val }}</textarea>
+                  <div class="form-text">Leave blank for none.</div>
+                </div>
+                <div class="mb-0">
+                  <label class="form-label fw-semibold">Request Body</label>
+                  <textarea name="body" class="form-control font-monospace" rows="4"
+                            placeholder='{"probe": true}'>{{ body_val }}</textarea>
+                  <div class="form-text">Sent as raw text — set <code>Content-Type</code> in headers if needed.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- ── DNS fields ── -->
+        {% set dns_type_val = fv.get('dns_record_type') or cfg.get('dns_record_type', 'A') %}
+        <div data-check-block="dns">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Query Name</label>
+            <input type="text" name="dns_query" class="form-control"
+                   value="{{ fv.get('dns_query') if fv.get('dns_query') else (cfg.get('dns_query') or '' if monitor else '') }}"
+                   placeholder="example.com" required>
+            <div class="form-text">Hostname to resolve.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Record Type</label>
+            <select name="dns_record_type" class="form-select">
+              {% for rt in ['A','AAAA'] %}
+              <option value="{{ rt }}" {% if dns_type_val == rt %}selected{% endif %}>{{ rt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Resolver (optional)</label>
+            <input type="text" name="dns_resolver" class="form-control"
+                   value="{{ fv.get('dns_resolver') if fv.get('dns_resolver') else (cfg.get('dns_resolver') or '' if monitor else '') }}"
+                   placeholder="1.1.1.1">
+            <div class="form-text">Nameserver IP to query. Leave blank to use the system resolver.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Expected Value (optional)</label>
+            <input type="text" name="expected_value" class="form-control"
+                   value="{{ fv.get('expected_value') if fv.get('expected_value') else (cfg.get('expected_value') or '' if monitor else '') }}"
+                   placeholder="203.0.113.5">
+            <div class="form-text">Mark DOWN unless a returned record equals this exactly.</div>
+          </div>
+        </div>
+
+        <!-- Interval + Max response (shared) -->
         <div class="mb-3">
           <label class="form-label fw-semibold">Check Interval (seconds)</label>
           <input type="number" name="interval" class="form-control"
                  value="{{ fv.get('interval') if fv.get('interval') else (monitor.interval if monitor else 60) }}" min="20" required>
           {% if not monitor %}<div class="form-text">Minimum 20 seconds.</div>{% endif %}
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Expected Status Codes</label>
-          <input type="text" name="expected_codes_raw" class="form-control"
-            value="{{ fv.get('expected_codes_raw') if fv.get('expected_codes_raw') else ((cfg.get('expected_codes') or [200]) | join(', ') if monitor else '200') }}"
-            placeholder="200, 201">
-          {% if not monitor %}<div class="form-text">Comma-separated list of acceptable HTTP status codes.</div>{% endif %}
         </div>
         <div class="mb-3">
           <label class="form-label fw-semibold">Max Response Time (optional)</label>
@@ -122,58 +212,29 @@
               placeholder="e.g. 2000" min="1">
             <span class="input-group-text">ms</span>
           </div>
-          <div class="form-text">Mark DOWN if response takes longer than this.</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Keyword (optional)</label>
-          <input type="text" name="keyword" class="form-control"
-                 value="{{ fv.get('keyword') if fv.get('keyword') else (cfg.get('keyword') or '' if monitor else '') }}"
-                 placeholder="ok">
-          {% if not monitor %}<div class="form-text">Response body must contain this string to be considered UP.</div>{% endif %}
-        </div>
-        {% set method_val = fv.get('method') or cfg.get('method', 'GET') %}
-        {% set headers_val = fv.get('headers_json') if fv.get('headers_json') else (cfg.get('headers') | tojson if cfg.get('headers') else '') %}
-        {% set body_val = fv.get('body') if fv.get('body') else (cfg.get('body') or '') %}
-        {% set advanced_open = method_val != 'GET' or headers_val or body_val %}
-        <div class="mb-3">
-          <button class="btn btn-link btn-sm p-0 text-decoration-none" type="button"
-                  data-bs-toggle="collapse" data-bs-target="#advanced-http"
-                  aria-expanded="{{ 'true' if advanced_open else 'false' }}" aria-controls="advanced-http">
-            <i class="bi bi-chevron-{{ 'down' if advanced_open else 'right' }}" id="advanced-chevron"></i> Advanced HTTP options
-          </button>
-          <div class="collapse {{ 'show' if advanced_open else '' }}" id="advanced-http">
-            <div class="border rounded p-3 mt-2">
-              <div class="mb-3">
-                <label class="form-label fw-semibold">HTTP Method</label>
-                <select name="method" class="form-select form-select-sm">
-                  {% for m in ['GET','POST','PUT','PATCH','DELETE','HEAD'] %}
-                  <option value="{{ m }}" {% if method_val == m %}selected{% endif %}>{{ m }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="mb-3">
-                <label class="form-label fw-semibold">Request Headers (JSON object)</label>
-                <textarea name="headers_json" class="form-control font-monospace" rows="3"
-                          placeholder='{"Authorization": "Bearer xxx"}'>{{ headers_val }}</textarea>
-                <div class="form-text">Leave blank for none.</div>
-              </div>
-              <div class="mb-0">
-                <label class="form-label fw-semibold">Request Body</label>
-                <textarea name="body" class="form-control font-monospace" rows="4"
-                          placeholder='{"probe": true}'>{{ body_val }}</textarea>
-                <div class="form-text">Sent as raw text — set <code>Content-Type</code> in headers if needed.</div>
-              </div>
-            </div>
-          </div>
+          <div class="form-text">Mark DOWN if the check takes longer than this.</div>
         </div>
         <script>
         (function() {
           var coll = document.getElementById('advanced-http');
           var chev = document.getElementById('advanced-chevron');
-          if (!coll || !chev) return;
-          coll.addEventListener('show.bs.collapse', function() { chev.classList.remove('bi-chevron-right'); chev.classList.add('bi-chevron-down'); });
-          coll.addEventListener('hide.bs.collapse', function() { chev.classList.remove('bi-chevron-down'); chev.classList.add('bi-chevron-right'); });
+          if (coll && chev) {
+            coll.addEventListener('show.bs.collapse', function() { chev.classList.remove('bi-chevron-right'); chev.classList.add('bi-chevron-down'); });
+            coll.addEventListener('hide.bs.collapse', function() { chev.classList.remove('bi-chevron-down'); chev.classList.add('bi-chevron-right'); });
+          }
         })();
+        // Show only the active check-type's fields; disable the rest so hidden
+        // inputs neither submit nor block HTML5 required-validation.
+        function applyCheckType(t) {
+          document.querySelectorAll('[data-check-block]').forEach(function(block) {
+            var active = block.getAttribute('data-check-block') === t;
+            block.style.display = active ? '' : 'none';
+            block.querySelectorAll('input, select, textarea').forEach(function(el) {
+              el.disabled = !active;
+            });
+          });
+        }
+        applyCheckType(document.getElementById('check_type').value);
         </script>
         <button type="submit" class="btn btn-primary">
           {% if monitor %}Save Changes{% else %}Create Monitor{% endif %}
