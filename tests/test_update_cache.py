@@ -33,6 +33,36 @@ class TestIsNewer:
         from app.update_cache import _is_newer
         assert _is_newer("not-a-version", "0.2.0") is False
 
+    @pytest.mark.parametrize("current", ["0.4.0-dev.1", "0.4.0.dev1"])
+    def test_prerelease_is_not_downgraded_to_older_stable(self, current):
+        """A pre-release of an unreleased version must not offer an older stable as an
+        upgrade. hatch-vcs normalises the "0.4.0-dev.1" git tag to PEP 440 "0.4.0.dev1"
+        before the runtime sees it, so both spellings must compare the same way."""
+        from app.update_cache import _is_newer
+        assert _is_newer("0.3.1", current) is False
+
+    @pytest.mark.parametrize("current", ["0.4.0-dev.1", "0.4.0.dev1"])
+    def test_prerelease_still_sees_its_own_stable(self, current):
+        from app.update_cache import _is_newer
+        assert _is_newer("0.4.0", current) is True
+
+    @pytest.mark.parametrize("current", ["0.4.0-dev.1", "0.4.0.dev1"])
+    def test_prerelease_still_sees_later_release(self, current):
+        from app.update_cache import _is_newer
+        assert _is_newer("0.5.0", current) is True
+
+    def test_later_prerelease_is_newer_than_earlier(self):
+        from app.update_cache import _is_newer
+        assert _is_newer("0.4.0-dev.2", "0.4.0-dev.1") is True
+        assert _is_newer("0.4.0-dev.1", "0.4.0-dev.2") is False
+
+    def test_prerelease_build_still_checks_for_updates(self):
+        """A published pre-release is a real release — it must not be treated as an
+        unreleased local build, or the badge would never appear."""
+        from app.update_cache import _is_dev_version
+        assert _is_dev_version("0.4.0.dev1") is False
+        assert _is_dev_version("0.4.0-dev.1") is False
+
 
 class TestRefresh:
     def test_dev_version_is_noop(self):

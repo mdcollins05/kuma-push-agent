@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from packaging.version import InvalidVersion, Version
 
 from .config import APP_VERSION
 
@@ -124,19 +125,14 @@ def _persist_check(dt: datetime, latest: str) -> None:
 
 
 def _is_newer(latest: str, current: str) -> bool:
-    def _parse(v: str) -> tuple[tuple, str | None]:
-        parts = v.split("-", 1)
-        try:
-            base = tuple(int(x) for x in parts[0].split("."))
-        except ValueError:
-            base = (0,)
-        pre = parts[1] if len(parts) > 1 else None
-        return base, pre
+    """Compare two versions under PEP 440.
 
-    latest_base, latest_pre = _parse(latest)
-    current_base, current_pre = _parse(current)
-
-    if latest_base != current_base:
-        return latest_base > current_base
-    # Same base version: stable release is newer than any pre-release
-    return latest_pre is None and current_pre is not None
+    Both spellings of a pre-release tag must compare identically: the git tag is
+    written "0.4.0-dev.1", but hatch-vcs normalises it to "0.4.0.dev1" before it
+    reaches the runtime via importlib.metadata. Version() parses both to the same
+    release, so a pre-release never reports an older stable as an upgrade.
+    """
+    try:
+        return Version(latest) > Version(current)
+    except InvalidVersion:
+        return False
