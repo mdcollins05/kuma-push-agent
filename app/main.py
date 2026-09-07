@@ -283,8 +283,10 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
     # The pooled Kuma connection outlives individual jobs, so it has to be closed
     # explicitly or its websocket read-loop thread keeps the process alive.
-    from .kuma import close_session
-    close_session()
+    # shutdown_pool() also gates further borrows: shutdown(wait=False) above does
+    # not wait for running jobs, and one still in flight would otherwise reopen it.
+    from .kuma import shutdown_pool
+    shutdown_pool()
     logger.info("Kuma Push Agent stopped")
 
 

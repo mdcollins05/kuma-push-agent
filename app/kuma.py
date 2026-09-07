@@ -117,6 +117,7 @@ _session_lock = threading.RLock()
 _session: UptimeKumaApi | None = None
 _session_creds: tuple[str, str, str] | None = None
 _session_opened_at: float = 0.0
+_shutting_down: bool = False
 
 
 def _open_session(kuma_url: str, kuma_username: str, kuma_password: str) -> UptimeKumaApi:
@@ -165,6 +166,34 @@ def close_session() -> None:
     _teardown_session(api)
 
 
+def invalidate_session_if_transient(exc: BaseException) -> bool:
+    """Drop the pooled session when a *caught* error looks like a dead connection.
+
+    kuma_session() only recycles on exceptions that escape its yield, so a call
+    site that catches and suppresses one inside the block would otherwise leave a
+    dead connection pooled for the next borrower. Returns True if the session was
+    dropped, which callers use to stop working through a connection that is gone.
+    """
+    if not is_transient_error(exc):
+        return False
+    close_session()
+    return True
+
+
+def shutdown_pool() -> None:
+    """Close the pooled session and refuse any further pooled borrows.
+
+    scheduler.shutdown(wait=False) does not wait for running jobs, so without the
+    gate a Kuma job still in flight can open a fresh pooled session after this
+    returns — and its websocket read-loop thread then keeps the process alive,
+    which is the thing closing was meant to prevent.
+    """
+    global _shutting_down
+    with _session_lock:
+        _shutting_down = True
+    close_session()
+
+
 def session_status() -> dict:
     """Introspection for the status endpoints: is a session pooled, and how old?"""
     with _session_lock:
@@ -198,6 +227,9 @@ def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str, fresh: b
         return
 
     with _session_lock:
+        if _shutting_down:
+            raise RuntimeError("Kuma session pool is shutting down")
+
         if _session is not None:
             if _session_creds != creds:
                 logger.info("Kuma credentials changed — recycling session")
@@ -307,6 +339,10 @@ def get_push_token_and_apply_tags(
                 api.add_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
             except Exception as exc:
                 logger.warning("Failed to apply tag %d to monitor %d: %s: %s", tag_id, kuma_monitor_id, type(exc).__name__, exc, exc_info=not is_transient_error(exc))
+                # The connection is gone — the remaining tags would fail too, and
+                # the dead session must not be left pooled for the next borrower.
+                if invalidate_session_if_transient(exc):
+                    break
     return push_token
 
 

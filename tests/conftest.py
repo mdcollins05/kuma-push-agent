@@ -117,7 +117,9 @@ def reset_kuma_session():
     kuma._session = None
     kuma._session_creds = None
     kuma._session_opened_at = 0.0
+    kuma._shutting_down = False
     yield
     kuma._session = None
     kuma._session_creds = None
     kuma._session_opened_at = 0.0
+    kuma._shutting_down = False

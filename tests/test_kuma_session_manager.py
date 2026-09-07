@@ -165,3 +165,85 @@ class TestIsTransientError:
     def test_not_transient(self, exc):
         """Real bugs must keep their stack traces."""
         assert kuma.is_transient_error(exc) is False
+
+
+class TestSuppressedErrorsInvalidate:
+    """A caught error inside a pooled block must not leave a dead session behind.
+
+    kuma_session() only recycles on exceptions that escape its yield, so call
+    sites that catch and suppress have to invalidate explicitly — otherwise the
+    next borrower inherits a connection that is already gone.
+    """
+
+    def test_transient_caught_error_drops_the_session(self):
+        import socketio
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session"):
+                with kuma.kuma_session(*CREDS):
+                    dropped = kuma.invalidate_session_if_transient(
+                        socketio.exceptions.DisconnectedError("gone")
+                    )
+        assert dropped is True
+        assert kuma._session is None
+
+    def test_non_transient_caught_error_keeps_the_session(self):
+        """A tag that already exists is not a connection problem — stay connected."""
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session"):
+                with kuma.kuma_session(*CREDS) as api:
+                    dropped = kuma.invalidate_session_if_transient(ValueError("tag exists"))
+        assert dropped is False
+        assert kuma._session is api
+
+    def test_apply_tags_drops_session_and_stops_on_dropped_connection(self):
+        """get_push_token_and_apply_tags swallows tag errors, so it must invalidate
+        itself — and stop, rather than work through a connection that is gone."""
+        import socketio
+        api = _fake_api()
+        api.get_monitor.return_value = {"pushToken": "tok"}
+        api.add_monitor_tag.side_effect = socketio.exceptions.DisconnectedError("gone")
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: api):
+            with patch.object(kuma, "_teardown_session"):
+                token = kuma.get_push_token_and_apply_tags(7, [1, 2, 3], *CREDS)
+
+        assert token == "tok"
+        assert api.add_monitor_tag.call_count == 1, "should stop after the connection drops"
+        assert kuma._session is None
+
+    def test_apply_tags_keeps_going_on_a_non_transient_tag_error(self):
+        """One bad tag must not abandon the rest — existing behaviour."""
+        api = _fake_api()
+        api.get_monitor.return_value = {"pushToken": "tok"}
+        api.add_monitor_tag.side_effect = ValueError("tag exists")
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: api):
+            with patch.object(kuma, "_teardown_session"):
+                token = kuma.get_push_token_and_apply_tags(7, [1, 2, 3], *CREDS)
+
+        assert token == "tok"
+        assert api.add_monitor_tag.call_count == 3
+        assert kuma._session is api
+
+
+class TestShutdownGate:
+    def test_shutdown_pool_closes_and_blocks_new_borrows(self):
+        """scheduler.shutdown(wait=False) does not wait, so a job still in flight
+        must not be able to reopen the pool after teardown."""
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session") as teardown:
+                with kuma.kuma_session(*CREDS) as api:
+                    pass
+                kuma.shutdown_pool()
+                teardown.assert_called_once_with(api)
+
+                with pytest.raises(RuntimeError, match="shutting down"):
+                    with kuma.kuma_session(*CREDS):
+                        pass
+        assert kuma._session is None
+
+    def test_shutdown_pool_is_safe_with_no_session_open(self):
+        with patch.object(kuma, "_teardown_session") as teardown:
+            kuma.shutdown_pool()
+        teardown.assert_not_called()
+        assert kuma._shutting_down is True

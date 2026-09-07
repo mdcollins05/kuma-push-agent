@@ -184,7 +184,8 @@ def process_kuma_tasks() -> None:
 
 
 def _run(task, app_cfg) -> None:
-    from .kuma import kuma_session, update_monitor, pause_monitor, resume_monitor, delete_monitor, is_transient_error
+    from .kuma import (kuma_session, update_monitor, pause_monitor, resume_monitor, delete_monitor,
+                       is_transient_error, invalidate_session_if_transient)
 
     url = app_cfg.kuma_url
     user = app_cfg.kuma_username
@@ -227,6 +228,10 @@ def _run(task, app_cfg) -> None:
                         result = api.add_tag(name=tag["name"], color=tag["color"])
                     except Exception as exc:
                         logger.warning("Failed to create tag %r: %s: %s — skipping", tag.get("name"), type(exc).__name__, exc, exc_info=not is_transient_error(exc))
+                        # A dead connection must not be left pooled, and the
+                        # remaining tags would fail against it anyway.
+                        if invalidate_session_if_transient(exc):
+                            break
                         continue
                     new_id = result["id"]
                     # Persist the new tag ID before attempting monitor association so it's
@@ -248,6 +253,8 @@ def _run(task, app_cfg) -> None:
                                 new_id, p["kuma_monitor_id"], type(exc).__name__, exc,
                                 exc_info=not is_transient_error(exc),
                             )
+                            if invalidate_session_if_transient(exc):
+                                break
         finally:
             db.close()
         try:
