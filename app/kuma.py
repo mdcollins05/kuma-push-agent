@@ -1,9 +1,15 @@
 import logging
+import threading
+import time
 import urllib.parse
 from contextlib import contextmanager
 
+import httpx
+from engineio import exceptions as eio_exceptions
+from socketio import exceptions as sio_exceptions
+
 try:
-    from uptime_kuma_api import UptimeKumaApi, MonitorType
+    from uptime_kuma_api import UptimeKumaApi, MonitorType, UptimeKumaException
 except ImportError as e:
     raise ImportError(
         "uptime-kuma-api-v2 is not installed. Run: uv add uptime-kuma-api-v2"
@@ -11,7 +17,55 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
-KUMA_TIMEOUT = 5
+# Login against a busy Kuma legitimately exceeds a few seconds: Kuma pushes the
+# full monitor list to every new client before answering the login call, so the
+# handshake cost scales with the size of the Kuma install.
+KUMA_TIMEOUT = 15
+
+# How long a pooled session is kept before being recycled. Recycling bounds the
+# socketio/engineio client's append-forever heartbeat buffers — without it the
+# long-lived client slowly becomes its own leak — and doubles as the reconnect
+# mechanism, since the next call after a teardown simply opens a fresh session.
+MAX_SESSION_AGE = 600
+
+_TRANSIENT_MESSAGE_PATTERNS = (
+    "unable to connect",
+    "connection",
+    "timeout",
+    "timed out",
+    "not connected",
+    "disconnected",
+)
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """True for routine connectivity blips that need no stack trace.
+
+    Kuma login timeouts and dropped sockets happen a few times an hour on a busy
+    instance and are self-healing — logging a full traceback for each one buries
+    the failures that actually need attention. Anything not matched here keeps
+    exc_info=True.
+    """
+    if isinstance(exc, (
+        sio_exceptions.TimeoutError,
+        sio_exceptions.ConnectionError,
+        sio_exceptions.DisconnectedError,
+        sio_exceptions.BadNamespaceError,
+        eio_exceptions.ConnectionError,
+        eio_exceptions.SocketIsClosedError,
+    )):
+        return True
+    # Builtin ConnectionError covers refused/reset/aborted; TimeoutError covers
+    # socket timeouts. Deliberately not bare OSError — too broad to stay useful.
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    # Push heartbeats are plain HTTP, so their transport failures land here too.
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, UptimeKumaException):
+        msg = str(exc).lower()
+        return any(pattern in msg for pattern in _TRANSIENT_MESSAGE_PATTERNS)
+    return False
 
 
 def _close_transport(sio) -> None:
@@ -54,32 +108,115 @@ def _connect_with_cleanup(self):
 UptimeKumaApi.connect = _connect_with_cleanup
 
 
-@contextmanager
-def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str):
-    """Open a single authenticated Kuma connection for multiple operations.
+# Pooled session state. Every Kuma operation in this module borrows the one
+# shared connection, serialized by _session_lock: the library's sync client
+# shares per-event response buffers, so concurrent operations on one client
+# interleave and hand each other's replies back. An RLock (not Lock) so a
+# nested borrow degrades into reuse rather than deadlock.
+_session_lock = threading.RLock()
+_session: UptimeKumaApi | None = None
+_session_creds: tuple[str, str, str] | None = None
+_session_opened_at: float = 0.0
 
-    Auto-reconnection is disabled and teardown goes through sio.shutdown()
-    rather than the library's disconnect(): disconnect() is a no-op once the
-    connection has already dropped (e.g. after a timeout), which leaves
-    python-socketio's reconnect thread alive. Each abandoned client then
-    reconnects on its own and buffers Kuma's heartbeat broadcasts forever —
-    a thread and memory leak. shutdown() also aborts an in-progress
-    reconnect attempt.
+
+def _open_session(kuma_url: str, kuma_username: str, kuma_password: str) -> UptimeKumaApi:
+    """Connect and authenticate one client, cleaning up if login fails.
+
+    Auto-reconnection stays disabled: the library reconnects the socket but
+    never re-runs login, so a reconnected client is authenticated in name only
+    and every subsequent call fails. Recycling is our reconnect instead.
     """
     api = UptimeKumaApi(kuma_url, timeout=KUMA_TIMEOUT)
     api.sio.reconnection = False
     try:
         api.login(kuma_username, kuma_password)
-        yield api
-    finally:
+    except Exception:
+        _teardown_session(api)
+        raise
+    return api
+
+
+def _teardown_session(api: UptimeKumaApi) -> None:
+    """Close one client. Teardown goes through sio.shutdown() rather than the
+    library's disconnect(): disconnect() is a no-op once the connection has
+    already dropped (e.g. after a timeout), which leaves python-socketio's
+    reconnect thread alive. Each abandoned client then reconnects on its own and
+    buffers Kuma's heartbeat broadcasts forever — a thread and memory leak.
+    shutdown() also aborts an in-progress reconnect attempt."""
+    try:
+        api.sio.shutdown()
+    except Exception as exc:
+        logger.warning("Kuma session shutdown failed: %s: %s", type(exc).__name__, exc)
+    state = getattr(getattr(api.sio, "eio", None), "state", "disconnected")
+    if state != "disconnected":
+        logger.warning("Kuma session still %r after shutdown — force-closing transport", state)
+    _close_transport(api.sio)
+
+
+def close_session() -> None:
+    """Tear down the pooled session, if any. Safe to call when none is open."""
+    global _session, _session_creds, _session_opened_at
+    with _session_lock:
+        if _session is None:
+            return
+        api, _session = _session, None
+        _session_creds = None
+        _session_opened_at = 0.0
+    _teardown_session(api)
+
+
+def session_status() -> dict:
+    """Introspection for the status endpoints: is a session pooled, and how old?"""
+    with _session_lock:
+        if _session is None:
+            return {"open": False, "age_seconds": None}
+        return {"open": True, "age_seconds": round(time.monotonic() - _session_opened_at, 1)}
+
+
+@contextmanager
+def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str, fresh: bool = False):
+    """Borrow the shared authenticated Kuma connection for one or more operations.
+
+    The session is opened lazily, reused across calls, and recycled when it ages
+    past MAX_SESSION_AGE, when the configured credentials change, or when an
+    operation raises — a failed call is the signal that the connection may be
+    dead, so it is dropped and the next caller reconnects.
+
+    Pass fresh=True to force a dedicated short-lived connection that is never
+    pooled. Only "test these credentials" wants this: reusing an already-open
+    session would report success without proving anything.
+    """
+    global _session, _session_creds, _session_opened_at
+    creds = (kuma_url, kuma_username, kuma_password)
+
+    if fresh:
+        api = _open_session(*creds)
         try:
-            api.sio.shutdown()
-        except Exception as exc:
-            logger.warning("Kuma session shutdown failed: %s: %s", type(exc).__name__, exc)
-        state = getattr(getattr(api.sio, "eio", None), "state", "disconnected")
-        if state != "disconnected":
-            logger.warning("Kuma session still %r after shutdown — force-closing transport", state)
-        _close_transport(api.sio)
+            yield api
+        finally:
+            _teardown_session(api)
+        return
+
+    with _session_lock:
+        if _session is not None:
+            if _session_creds != creds:
+                logger.info("Kuma credentials changed — recycling session")
+                close_session()
+            elif time.monotonic() - _session_opened_at >= MAX_SESSION_AGE:
+                logger.debug("Kuma session reached max age — recycling")
+                close_session()
+
+        if _session is None:
+            _session = _open_session(*creds)
+            _session_creds = creds
+            _session_opened_at = time.monotonic()
+            logger.debug("Kuma session opened")
+
+        try:
+            yield _session
+        except Exception:
+            close_session()
+            raise
 
 
 def create_push_monitor(
@@ -169,7 +306,7 @@ def get_push_token_and_apply_tags(
             try:
                 api.add_monitor_tag(tag_id=tag_id, monitor_id=kuma_monitor_id)
             except Exception as exc:
-                logger.warning("Failed to apply tag %d to monitor %d: %s: %s", tag_id, kuma_monitor_id, type(exc).__name__, exc, exc_info=True)
+                logger.warning("Failed to apply tag %d to monitor %d: %s: %s", tag_id, kuma_monitor_id, type(exc).__name__, exc, exc_info=not is_transient_error(exc))
     return push_token
 
 
@@ -294,8 +431,13 @@ def test_connection(
     kuma_username: str,
     kuma_password: str,
 ) -> None:
-    """Test Kuma connectivity and credentials. Blocking — raises on failure."""
-    with kuma_session(kuma_url, kuma_username, kuma_password):
+    """Test Kuma connectivity and credentials. Blocking — raises on failure.
+
+    Forces a dedicated connection: borrowing the pooled session would report
+    success from an already-open connection without testing the credentials
+    that were actually passed in.
+    """
+    with kuma_session(kuma_url, kuma_username, kuma_password, fresh=True):
         pass
 
 
