@@ -60,7 +60,7 @@ The session is opened lazily and recycled when it ages past `MAX_SESSION_AGE` (1
 
 Pass `fresh=True` for a dedicated, never-pooled connection. Only "test these credentials" wants this — reusing the pooled session would report success without testing the credentials passed in.
 
-Call `close_session()` on shutdown; the websocket read-loop thread keeps the process alive otherwise.
+Call `shutdown_pool()` on shutdown. It sets the refuse-new-borrows gate under a separate lock so it takes effect immediately, then closes the session only if it can take `_session_lock` within `SHUTDOWN_LOCK_TIMEOUT` — waiting on a busy session would exceed Docker's 10s stop window, and closing a client an active borrower is using is unsafe. Skipping is fine: engineio's loops are daemon threads and die with the process. Lock order is `_state_lock` before `_session_lock`, never the reverse.
 
 ### push_token is not in add_monitor() response
 After `api.add_monitor()`, you must call `api.get_monitor(kuma_id)` to retrieve `pushToken`. The return value of `add_monitor()` only contains `{"msg": "...", "monitorId": <int>}`.

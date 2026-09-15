@@ -28,6 +28,11 @@ KUMA_TIMEOUT = 15
 # mechanism, since the next call after a teardown simply opens a fresh session.
 MAX_SESSION_AGE = 600
 
+# How long shutdown waits for an in-flight operation before giving up on closing
+# the session. Docker's default stop window is 10s and a single Kuma call can take
+# KUMA_TIMEOUT, so waiting is worse than skipping.
+SHUTDOWN_LOCK_TIMEOUT = 2.0
+
 _TRANSIENT_MESSAGE_PATTERNS = (
     "unable to connect",
     "connection",
@@ -113,6 +118,10 @@ UptimeKumaApi.connect = _connect_with_cleanup
 # shares per-event response buffers, so concurrent operations on one client
 # interleave and hand each other's replies back. An RLock (not Lock) so a
 # nested borrow degrades into reuse rather than deadlock.
+# _state_lock guards _shutting_down only and is never held across I/O, so the
+# shutdown gate takes effect immediately even while a Kuma call is in flight.
+# Lock order is _state_lock before _session_lock; never the reverse.
+_state_lock = threading.Lock()
 _session_lock = threading.RLock()
 _session: UptimeKumaApi | None = None
 _session_creds: tuple[str, str, str] | None = None
@@ -181,17 +190,38 @@ def invalidate_session_if_transient(exc: BaseException) -> bool:
 
 
 def shutdown_pool() -> None:
-    """Close the pooled session and refuse any further pooled borrows.
+    """Refuse further pooled borrows, then close the session if it is free.
 
-    scheduler.shutdown(wait=False) does not wait for running jobs, so without the
-    gate a Kuma job still in flight can open a fresh pooled session after this
-    returns — and its websocket read-loop thread then keeps the process alive,
-    which is the thing closing was meant to prevent.
+    The gate is set first and under its own lock, so it takes effect immediately:
+    scheduler.shutdown(wait=False) leaves jobs running, and kuma_session() holds
+    _session_lock across its whole block, so an in-flight operation can hold that
+    lock for up to KUMA_TIMEOUT per call.
+
+    Closing is then best-effort. Waiting on a busy session would push shutdown past
+    Docker's 10s stop window and earn a SIGKILL, and closing the client underneath
+    an active borrower is not safe — the sync socketio client does not support
+    concurrent emits, and shutdown() sends disconnect packets before closing the
+    transport. So if the session is busy we leave it: engineio starts its read and
+    write loops with daemon=True, so they do not hold the process open.
     """
-    global _shutting_down
-    with _session_lock:
+    global _shutting_down, _session, _session_creds, _session_opened_at
+    with _state_lock:
         _shutting_down = True
-    close_session()
+
+    if not _session_lock.acquire(timeout=SHUTDOWN_LOCK_TIMEOUT):
+        logger.warning(
+            "Kuma session still busy after %.0fs — leaving it to process exit", SHUTDOWN_LOCK_TIMEOUT
+        )
+        return
+    try:
+        api, _session = _session, None
+        _session_creds = None
+        _session_opened_at = 0.0
+    finally:
+        _session_lock.release()
+
+    if api is not None:
+        _teardown_session(api)
 
 
 def session_status() -> dict:
@@ -226,10 +256,15 @@ def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str, fresh: b
             _teardown_session(api)
         return
 
-    with _session_lock:
+    # Checked before taking _session_lock so a borrow is rejected immediately
+    # rather than queueing behind an in-flight call. A borrow that passes this
+    # check just as shutdown begins still opens a session; that is harmless,
+    # since engineio's threads are daemon and die with the process.
+    with _state_lock:
         if _shutting_down:
             raise RuntimeError("Kuma session pool is shutting down")
 
+    with _session_lock:
         if _session is not None:
             if _session_creds != creds:
                 logger.info("Kuma credentials changed — recycling session")

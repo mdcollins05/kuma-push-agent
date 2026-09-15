@@ -1,4 +1,6 @@
 """Tests for the pooled Kuma session manager and transient-error classification."""
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -311,3 +313,72 @@ class TestTeardownSession:
         api.sio.eio.http = None
         kuma._teardown_session(api)  # must not raise
         api.sio.shutdown.assert_called_once_with()
+
+
+class TestShutdownDoesNotBlock:
+    """Shutdown must not queue behind an in-flight Kuma call.
+
+    kuma_session() holds _session_lock across its whole block and a single call can
+    take KUMA_TIMEOUT (15s), so waiting would blow past Docker's 10s stop window.
+    """
+
+    @staticmethod
+    def _borrow_and_hold(holding, release):
+        def run():
+            with kuma.kuma_session(*CREDS):
+                holding.set()
+                release.wait(5)
+        return run
+
+    def test_gate_is_set_immediately_while_a_call_is_in_flight(self, monkeypatch):
+        monkeypatch.setattr(kuma, "SHUTDOWN_LOCK_TIMEOUT", 0.1)
+        holding, release = threading.Event(), threading.Event()
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session"):
+                t = threading.Thread(target=self._borrow_and_hold(holding, release))
+                t.start()
+                assert holding.wait(5), "borrower never started"
+
+                started = time.monotonic()
+                kuma.shutdown_pool()
+                elapsed = time.monotonic() - started
+
+                assert elapsed < 1.0, f"shutdown blocked for {elapsed:.1f}s"
+                assert kuma._shutting_down is True
+
+                # The gate holds even though the session could not be closed.
+                with pytest.raises(RuntimeError, match="shutting down"):
+                    with kuma.kuma_session(*CREDS):
+                        pass
+
+                release.set()
+                t.join(5)
+
+    def test_busy_session_is_left_open_rather_than_closed_underneath_a_borrower(self, monkeypatch):
+        """Closing a client an active borrower is using is unsafe — the sync
+        socketio client does not support concurrent emits."""
+        monkeypatch.setattr(kuma, "SHUTDOWN_LOCK_TIMEOUT", 0.1)
+        holding, release = threading.Event(), threading.Event()
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session") as teardown:
+                t = threading.Thread(target=self._borrow_and_hold(holding, release))
+                t.start()
+                assert holding.wait(5)
+
+                kuma.shutdown_pool()
+                teardown.assert_not_called()
+
+                release.set()
+                t.join(5)
+
+    def test_idle_session_is_still_closed(self):
+        """The bounded wait must not stop a normal shutdown from closing."""
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session") as teardown:
+                with kuma.kuma_session(*CREDS) as api:
+                    pass
+                kuma.shutdown_pool()
+                teardown.assert_called_once_with(api)
+        assert kuma._session is None

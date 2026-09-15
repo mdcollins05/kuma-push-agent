@@ -281,10 +281,10 @@ async def lifespan(app: FastAPI):
     yield
 
     scheduler.shutdown(wait=False)
-    # The pooled Kuma connection outlives individual jobs, so it has to be closed
-    # explicitly or its websocket read-loop thread keeps the process alive.
-    # shutdown_pool() also gates further borrows: shutdown(wait=False) above does
-    # not wait for running jobs, and one still in flight would otherwise reopen it.
+    # shutdown_pool() gates further borrows first: shutdown(wait=False) above does
+    # not wait for running jobs, and one still in flight would otherwise reopen the
+    # pool. Closing is best-effort and bounded — engineio's loops are daemon
+    # threads, so a session left open does not hold the process.
     from .kuma import shutdown_pool
     shutdown_pool()
     logger.info("Kuma Push Agent stopped")
