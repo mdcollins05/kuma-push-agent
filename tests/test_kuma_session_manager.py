@@ -382,3 +382,41 @@ class TestShutdownDoesNotBlock:
                 kuma.shutdown_pool()
                 teardown.assert_called_once_with(api)
         assert kuma._session is None
+
+    def test_borrower_queued_behind_an_active_session_is_rejected(self, monkeypatch):
+        """The window CodeRabbit flagged: a borrower can pass the pre-check, then
+        block on _session_lock while shutdown begins. When it finally gets the lock
+        it must not open a fresh session."""
+        monkeypatch.setattr(kuma, "SHUTDOWN_LOCK_TIMEOUT", 0.1)
+        holding, release = threading.Event(), threading.Event()
+        queued = threading.Event()
+        result = {}
+
+        def queued_borrower():
+            queued.set()
+            try:
+                with kuma.kuma_session(*CREDS):
+                    result["outcome"] = "opened"
+            except RuntimeError as exc:
+                result["outcome"] = f"rejected: {exc}"
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()) as open_:
+            with patch.object(kuma, "_teardown_session"):
+                holder = threading.Thread(target=self._borrow_and_hold(holding, release))
+                holder.start()
+                assert holding.wait(5)
+                opens_before = open_.call_count
+
+                # Second borrower blocks on _session_lock behind the holder.
+                waiter = threading.Thread(target=queued_borrower)
+                waiter.start()
+                assert queued.wait(5)
+                time.sleep(0.2)  # let it reach the lock
+
+                kuma.shutdown_pool()   # sets the gate while the waiter is queued
+                release.set()          # holder finishes, waiter gets the lock
+                holder.join(5)
+                waiter.join(5)
+
+                assert result["outcome"].startswith("rejected"), result
+                assert open_.call_count == opens_before, "must not open during shutdown"

@@ -120,7 +120,8 @@ UptimeKumaApi.connect = _connect_with_cleanup
 # nested borrow degrades into reuse rather than deadlock.
 # _state_lock guards _shutting_down only and is never held across I/O, so the
 # shutdown gate takes effect immediately even while a Kuma call is in flight.
-# Lock order is _state_lock before _session_lock; never the reverse.
+# It is a leaf lock: shutdown_pool() releases it before touching _session_lock,
+# so no code path holds it while acquiring another lock and there is no cycle.
 _state_lock = threading.Lock()
 _session_lock = threading.RLock()
 _session: UptimeKumaApi | None = None
@@ -257,14 +258,20 @@ def kuma_session(kuma_url: str, kuma_username: str, kuma_password: str, fresh: b
         return
 
     # Checked before taking _session_lock so a borrow is rejected immediately
-    # rather than queueing behind an in-flight call. A borrow that passes this
-    # check just as shutdown begins still opens a session; that is harmless,
-    # since engineio's threads are daemon and die with the process.
+    # rather than queueing behind an in-flight call.
     with _state_lock:
         if _shutting_down:
             raise RuntimeError("Kuma session pool is shutting down")
 
     with _session_lock:
+        # Re-checked now that the operation lock is held: a borrower that queued
+        # behind an active session may have passed the check above before shutdown
+        # began, and must not go on to open a fresh one. Safe to nest because
+        # _state_lock is a leaf — nothing acquires _session_lock while holding it.
+        with _state_lock:
+            if _shutting_down:
+                raise RuntimeError("Kuma session pool is shutting down")
+
         if _session is not None:
             if _session_creds != creds:
                 logger.info("Kuma credentials changed — recycling session")
