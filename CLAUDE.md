@@ -51,8 +51,16 @@ app/
 ### uptime-kuma-api-v2 is blocking (sync Socket.IO)
 Every call — `login()`, `add_monitor()`, `get_monitor()`, `pause_monitor()`, `delete_monitor()` — blocks the calling thread. **Never call from async context directly.** Always use `fastapi.concurrency.run_in_threadpool()` in route handlers, or call from within a threadpool APScheduler job.
 
-### Short-lived Kuma connections
-Use `with UptimeKumaApi(url) as api:` pattern in every function in `kuma.py`. Never create a long-lived singleton — sessions time out and there's no reconnect logic.
+### One pooled Kuma connection, recycled
+Every function in `kuma.py` borrows a single shared authenticated connection via `with kuma_session(url, user, pw) as api:`. Never construct `UptimeKumaApi` directly — the pool owns its lifecycle.
+
+The session is opened lazily and recycled when it ages past `MAX_SESSION_AGE` (10 min), when the configured credentials change, or when an operation raises. Recycling *is* the reconnect: a failed call drops the session and the next caller opens a fresh one. This matters because the library's own auto-reconnect is deliberately disabled — it reconnects the socket but never re-runs `login()`, leaving a client that is authenticated in name only.
+
+`_session_lock` is an `RLock` and serializes every operation: the sync client shares per-event response buffers, so concurrent calls on one client hand each other's replies back.
+
+Pass `fresh=True` for a dedicated, never-pooled connection. Only "test these credentials" wants this — reusing the pooled session would report success without testing the credentials passed in.
+
+Call `shutdown_pool()` on shutdown. It sets the refuse-new-borrows gate under a separate lock so it takes effect immediately, then closes the session only if it can take `_session_lock` within `SHUTDOWN_LOCK_TIMEOUT` — waiting on a busy session would exceed Docker's 10s stop window, and closing a client an active borrower is using is unsafe. Skipping is fine: engineio's loops are daemon threads and die with the process. Lock order is `_state_lock` before `_session_lock`, never the reverse.
 
 ### push_token is not in add_monitor() response
 After `api.add_monitor()`, you must call `api.get_monitor(kuma_id)` to retrieve `pushToken`. The return value of `add_monitor()` only contains `{"msg": "...", "monitorId": <int>}`.

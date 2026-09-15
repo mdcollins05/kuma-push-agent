@@ -127,6 +127,7 @@ def process_kuma_tasks() -> None:
     """Process pending Kuma sync tasks. Runs in APScheduler thread pool."""
     from sqlalchemy import or_
     from .database import SessionLocal
+    from .kuma import is_transient_error
     from .models import AppSettings, KumaTask
 
     global _last_run, _last_error
@@ -154,7 +155,7 @@ def process_kuma_tasks() -> None:
                 task.status = "done"
             except Exception as exc:
                 error_msg = f"{type(exc).__name__}: {exc}"[:1000] or type(exc).__name__
-                logger.warning("Kuma task %d (%s) failed (attempt %d): %s: %s", task.id, task.task_type, task.retry_count + 1, type(exc).__name__, exc, exc_info=True)
+                logger.warning("Kuma task %d (%s) failed (attempt %d): %s: %s", task.id, task.task_type, task.retry_count + 1, type(exc).__name__, exc, exc_info=not is_transient_error(exc))
                 if task.retry_count < MAX_RETRIES:
                     task.retry_count += 1
                     task.status = "pending"
@@ -183,7 +184,8 @@ def process_kuma_tasks() -> None:
 
 
 def _run(task, app_cfg) -> None:
-    from .kuma import kuma_session, update_monitor, pause_monitor, resume_monitor, delete_monitor
+    from .kuma import (kuma_session, update_monitor, pause_monitor, resume_monitor, delete_monitor,
+                       is_transient_error, invalidate_session_if_transient)
 
     url = app_cfg.kuma_url
     user = app_cfg.kuma_username
@@ -225,7 +227,11 @@ def _run(task, app_cfg) -> None:
                     try:
                         result = api.add_tag(name=tag["name"], color=tag["color"])
                     except Exception as exc:
-                        logger.warning("Failed to create tag %r: %s: %s — skipping", tag.get("name"), type(exc).__name__, exc, exc_info=True)
+                        logger.warning("Failed to create tag %r: %s: %s — skipping", tag.get("name"), type(exc).__name__, exc, exc_info=not is_transient_error(exc))
+                        # A dead connection must not be left pooled, and the
+                        # remaining tags would fail against it anyway.
+                        if invalidate_session_if_transient(exc):
+                            break
                         continue
                     new_id = result["id"]
                     # Persist the new tag ID before attempting monitor association so it's
@@ -245,14 +251,16 @@ def _run(task, app_cfg) -> None:
                                 "Failed to associate tag %d with kuma monitor %d: %s: %s — "
                                 "will be applied on next resync",
                                 new_id, p["kuma_monitor_id"], type(exc).__name__, exc,
-                                exc_info=True,
+                                exc_info=not is_transient_error(exc),
                             )
+                            if invalidate_session_if_transient(exc):
+                                break
         finally:
             db.close()
         try:
             refresh_tag_cache()
         except Exception as exc:
-            logger.warning("Tag cache refresh failed after create_tags: %s: %s", type(exc).__name__, exc, exc_info=True)
+            logger.warning("Tag cache refresh failed after create_tags: %s: %s", type(exc).__name__, exc, exc_info=not is_transient_error(exc))
     elif task.task_type == "create_tag":
         from .tag_cache import refresh as refresh_tag_cache
         with kuma_session(url, user, pw) as api:
@@ -260,7 +268,7 @@ def _run(task, app_cfg) -> None:
         try:
             refresh_tag_cache()
         except Exception as exc:
-            logger.warning("Tag cache refresh failed after create_tag: %s: %s", type(exc).__name__, exc, exc_info=True)
+            logger.warning("Tag cache refresh failed after create_tag: %s: %s", type(exc).__name__, exc, exc_info=not is_transient_error(exc))
     elif task.task_type == "sync_monitor":
         pass  # resolved inline by checker.py; should not reach the queue processor
     else:

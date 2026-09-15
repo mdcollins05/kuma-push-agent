@@ -101,3 +101,25 @@ def reset_cache_module_state():
     gc._last_run = None
     gc._last_error = None
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_kuma_session():
+    """Drop the pooled Kuma session between tests.
+
+    app.kuma pools one authenticated connection process-wide, so without this a
+    test's fake client stays pooled and answers calls in later tests — which
+    patch UptimeKumaApi but never reach it, because no new session is opened.
+    Cleared directly rather than via close_session() so a mock client is not
+    handed to the real teardown path.
+    """
+    import app.kuma as kuma
+    kuma._session = None
+    kuma._session_creds = None
+    kuma._session_opened_at = 0.0
+    kuma._shutting_down = False
+    yield
+    kuma._session = None
+    kuma._session_creds = None
+    kuma._session_opened_at = 0.0
+    kuma._shutting_down = False

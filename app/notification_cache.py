@@ -49,7 +49,7 @@ def refresh(raise_on_error: bool = False) -> None:
     """Fetch notifications from Kuma, update in-memory cache, and persist to DB."""
     from .database import SessionLocal
     from .models import AppSettings, KumaNotification
-    from .kuma import get_notifications
+    from .kuma import get_notifications, is_transient_error
 
     global _cache, _last_run, _last_error
 
@@ -76,7 +76,7 @@ def refresh(raise_on_error: bool = False) -> None:
             _last_error = None
         logger.debug("Notification cache refreshed from Kuma: %d entries", len(notifications))
     except Exception as exc:
-        logger.warning("Notification cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+        logger.warning("Notification cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=not is_transient_error(exc))
         with _lock:
             _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = f"{type(exc).__name__}: {exc}"
