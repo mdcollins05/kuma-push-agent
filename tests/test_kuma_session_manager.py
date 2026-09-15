@@ -247,3 +247,67 @@ class TestShutdownGate:
             kuma.shutdown_pool()
         teardown.assert_not_called()
         assert kuma._shutting_down is True
+
+
+class TestTeardownSession:
+    """The real teardown path, unmocked.
+
+    Every other test in this file mocks _teardown_session, so without these the
+    function introduced by this PR — and the leak fix it wraps — has no coverage
+    at all. It is called from three paths the old inline finally never was: age
+    recycle, error recycle, and shutdown.
+    """
+
+    @staticmethod
+    def _api(*, state="disconnected", shutdown_raises=None):
+        api = MagicMock()
+        api.sio.eio.state = state
+        api.sio.eio.ws = MagicMock()
+        api.sio.eio.http = MagicMock()
+        if shutdown_raises is not None:
+            api.sio.shutdown.side_effect = shutdown_raises
+        return api
+
+    def test_shuts_down_and_closes_both_transports(self):
+        api = self._api()
+        kuma._teardown_session(api)
+        api.sio.shutdown.assert_called_once_with()
+        api.sio.eio.ws.close.assert_called_once_with()
+        api.sio.eio.http.close.assert_called_once_with()
+
+    def test_transports_still_closed_when_shutdown_raises(self):
+        """The whole point of the force-close: shutdown() failing must not strand
+        a live websocket, whose read-loop thread keeps the process alive."""
+        api = self._api(shutdown_raises=RuntimeError("already gone"))
+        kuma._teardown_session(api)  # must not raise
+        api.sio.eio.ws.close.assert_called_once_with()
+        api.sio.eio.http.close.assert_called_once_with()
+
+    def test_warns_when_still_connected_after_shutdown(self, caplog):
+        api = self._api(state="connected")
+        with caplog.at_level("WARNING"):
+            kuma._teardown_session(api)
+        assert "force-closing transport" in caplog.text
+        api.sio.eio.ws.close.assert_called_once_with()
+
+    def test_no_warning_on_a_clean_shutdown(self, caplog):
+        api = self._api()
+        with caplog.at_level("WARNING"):
+            kuma._teardown_session(api)
+        assert caplog.text == ""
+
+    def test_survives_a_transport_that_fails_to_close(self):
+        """One resource refusing to close must not skip the other."""
+        api = self._api()
+        api.sio.eio.ws.close.side_effect = OSError("bad fd")
+        kuma._teardown_session(api)  # must not raise
+        api.sio.eio.http.close.assert_called_once_with()
+
+    def test_handles_a_client_with_no_transports(self):
+        """A client that failed mid-handshake has no ws/http yet."""
+        api = MagicMock()
+        api.sio.eio.state = "disconnected"
+        api.sio.eio.ws = None
+        api.sio.eio.http = None
+        kuma._teardown_session(api)  # must not raise
+        api.sio.shutdown.assert_called_once_with()
