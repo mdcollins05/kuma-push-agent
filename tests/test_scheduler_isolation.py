@@ -6,8 +6,9 @@ immediately, so an unpaused scheduler runs it in a worker thread that loads and
 commits the row while the test is still mutating it — the source of the flaky
 `Could not refresh instance` / `StaleDataError` failures in the CRUD tests.
 """
-import time
 from unittest.mock import patch
+
+from apscheduler.schedulers.base import STATE_PAUSED
 
 from app.scheduler import scheduler
 from tests.conftest import HEADERS
@@ -24,7 +25,7 @@ def test_creating_a_monitor_schedules_but_does_not_run_its_check(client):
         mid = resp.json()["id"]
         try:
             assert scheduler.get_job(f"monitor_{mid}") is not None, "job should still be registered"
-            time.sleep(0.5)  # an unpaused scheduler fires a due job within milliseconds
+            assert scheduler.state == STATE_PAUSED
             run_check.assert_not_called()
         finally:
             client.delete(f"/api/v1/monitors/{mid}", headers=HEADERS)
