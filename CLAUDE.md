@@ -180,7 +180,7 @@ docker compose --profile test run --rm test
 
 - Tests use an in-memory SQLite DB isolated from production data
 - FastAPI dependency overrides replace `get_db`, `require_auth`, and `require_api_key`
-- Background jobs (APScheduler) start but use the real DB path — they won't affect test results since `AppSettings.configured=False` causes early returns
+- The app's APScheduler is started **paused** by the `client` fixture: jobs are registered (tests can assert on them) but never run. Unpaused, a new monitor's `run_check` fires immediately in a worker thread against the shared in-memory DB and races the test mutating the row. `tests/test_scheduler_isolation.py` guards this
 - Test files live in `tests/conftest.py` (fixtures) + `tests/test_api_monitors.py` + `tests/test_status_endpoints.py`
 
 ## Known Limitations / Watch Out For
