@@ -383,6 +383,27 @@ class TestShutdownDoesNotBlock:
                 teardown.assert_called_once_with(api)
         assert kuma._session is None
 
+    def test_teardown_that_hangs_does_not_block_shutdown(self, monkeypatch, caplog):
+        """Against a Kuma that has gone silent, websocket close() waits forever for
+        the server's close frame. Shutdown must give up rather than hold the
+        process past Docker's stop window."""
+        monkeypatch.setattr(kuma, "SHUTDOWN_TEARDOWN_TIMEOUT", 0.1)
+        release = threading.Event()
+
+        with patch.object(kuma, "_open_session", side_effect=lambda *a: _fake_api()):
+            with patch.object(kuma, "_teardown_session", side_effect=lambda api: release.wait(5)):
+                with kuma.kuma_session(*CREDS):
+                    pass
+
+                started = time.monotonic()
+                kuma.shutdown_pool()
+                elapsed = time.monotonic() - started
+
+        release.set()
+        assert elapsed < 1.0, f"shutdown blocked for {elapsed:.1f}s"
+        assert kuma._session is None
+        assert "did not close" in caplog.text
+
     def test_borrower_queued_behind_an_active_session_is_rejected(self, monkeypatch):
         """The window CodeRabbit flagged: a borrower can pass the pre-check, then
         block on _session_lock while shutdown begins. When it finally gets the lock

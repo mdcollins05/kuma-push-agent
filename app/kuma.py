@@ -33,6 +33,12 @@ MAX_SESSION_AGE = 600
 # KUMA_TIMEOUT, so waiting is worse than skipping.
 SHUTDOWN_LOCK_TIMEOUT = 2.0
 
+# How long shutdown waits for an idle session to close. Closing is not bounded by
+# the library: websocket-client's close() blocks reading for the server's close
+# frame, which never arrives if Kuma has gone silent (packets dropped, host gone
+# without a RST). Lock wait plus this must stay well inside Docker's 10s window.
+SHUTDOWN_TEARDOWN_TIMEOUT = 2.0
+
 _TRANSIENT_MESSAGE_PATTERNS = (
     "unable to connect",
     "connection",
@@ -204,6 +210,10 @@ def shutdown_pool() -> None:
     concurrent emits, and shutdown() sends disconnect packets before closing the
     transport. So if the session is busy we leave it: engineio starts its read and
     write loops with daemon=True, so they do not hold the process open.
+
+    Teardown of an idle session is bounded too, by running it on a daemon thread:
+    against a Kuma that has gone silent, close() waits indefinitely for a close
+    frame. An abandoned teardown thread dies with the process like engineio's own.
     """
     global _shutting_down, _session, _session_creds, _session_opened_at
     with _state_lock:
@@ -221,8 +231,18 @@ def shutdown_pool() -> None:
     finally:
         _session_lock.release()
 
-    if api is not None:
-        _teardown_session(api)
+    if api is None:
+        return
+    teardown = threading.Thread(
+        target=_teardown_session, args=(api,), name="kuma-shutdown-teardown", daemon=True
+    )
+    teardown.start()
+    teardown.join(SHUTDOWN_TEARDOWN_TIMEOUT)
+    if teardown.is_alive():
+        logger.warning(
+            "Kuma session did not close within %.0fs — leaving it to process exit",
+            SHUTDOWN_TEARDOWN_TIMEOUT,
+        )
 
 
 def session_status() -> dict:
