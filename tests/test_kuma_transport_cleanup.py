@@ -38,8 +38,8 @@ class TestCloseTransport:
             sio.eio.http.close.assert_called_once_with()
 
     def test_one_failing_close_does_not_skip_the_other(self):
-        """The websocket is the one holding the thread — it must still be closed
-        even if the polling session blows up first, and vice versa."""
+        """The websocket is closed first; if that fails, the polling session
+        must still be closed rather than left open behind it."""
         sio = _sio()
         sio.eio.ws.close.side_effect = OSError("bad fd")
         kuma._close_transport(sio)  # must not raise
