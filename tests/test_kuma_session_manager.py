@@ -413,8 +413,31 @@ class TestShutdownDoesNotBlock:
         queued = threading.Event()
         result = {}
 
+        class SignallingLock:
+            """Wraps _session_lock to signal when the waiter tries to take it —
+            proof it has passed the pre-check, so only the re-check can reject it."""
+
+            def __init__(self, inner):
+                self._inner = inner
+
+            def acquire(self, *args, **kwargs):
+                if threading.current_thread().name == "queued-borrower":
+                    queued.set()
+                return self._inner.acquire(*args, **kwargs)
+
+            def release(self):
+                self._inner.release()
+
+            def __enter__(self):
+                self.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.release()
+
+        monkeypatch.setattr(kuma, "_session_lock", SignallingLock(kuma._session_lock))
+
         def queued_borrower():
-            queued.set()
             try:
                 with kuma.kuma_session(*CREDS):
                     result["outcome"] = "opened"
@@ -429,10 +452,9 @@ class TestShutdownDoesNotBlock:
                 opens_before = open_.call_count
 
                 # Second borrower blocks on _session_lock behind the holder.
-                waiter = threading.Thread(target=queued_borrower)
+                waiter = threading.Thread(target=queued_borrower, name="queued-borrower")
                 waiter.start()
-                assert queued.wait(5)
-                time.sleep(0.2)  # let it reach the lock
+                assert queued.wait(5), "waiter never reached _session_lock"
 
                 kuma.shutdown_pool()   # sets the gate while the waiter is queued
                 release.set()          # holder finishes, waiter gets the lock
