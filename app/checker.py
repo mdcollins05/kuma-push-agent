@@ -82,7 +82,7 @@ def _check_dns(config: dict) -> tuple[str, str, int]:
 def run_check(monitor_id: int) -> None:
     """Health-check one monitor and push the result to Kuma. Runs in a thread pool."""
     from .database import SessionLocal
-    from .kuma import build_push_url, create_push_monitor
+    from .kuma import build_push_url, create_push_monitor, is_transient_error
     from .models import AppSettings, Monitor
 
     logger.info("run_check start: monitor_id=%d", monitor_id)
@@ -154,7 +154,7 @@ def run_check(monitor_id: int) -> None:
                 sync_task.status = "done"
                 db.commit()
             except Exception as exc:
-                logger.warning("Kuma sync failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
+                logger.warning("Kuma sync failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=not is_transient_error(exc))
                 sync_task.status = "failed"
                 sync_task.error = f"{type(exc).__name__}: {exc}"[:1000]
                 db.commit()
@@ -187,6 +187,6 @@ def run_check(monitor_id: int) -> None:
                     monitor.kuma_missing = False
                     db.commit()
             except Exception as exc:
-                logger.warning("Kuma push failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=True)
+                logger.warning("Kuma push failed for monitor %d: %s: %s", monitor_id, type(exc).__name__, exc, exc_info=not is_transient_error(exc))
     finally:
         db.close()

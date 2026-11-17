@@ -49,7 +49,7 @@ def refresh(raise_on_error: bool = False) -> None:
     """Fetch tags from Kuma, update in-memory cache, and persist to DB."""
     from .database import SessionLocal
     from .models import AppSettings, KumaTag
-    from .kuma import get_tags
+    from .kuma import get_tags, is_transient_error
 
     global _cache, _last_run, _last_error
 
@@ -76,7 +76,7 @@ def refresh(raise_on_error: bool = False) -> None:
             _last_error = None
         logger.debug("Tag cache refreshed from Kuma: %d entries", len(tags))
     except Exception as exc:
-        logger.warning("Tag cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=True)
+        logger.warning("Tag cache refresh failed: %s: %s", type(exc).__name__, exc, exc_info=not is_transient_error(exc))
         with _lock:
             _last_run = datetime.now(timezone.utc).replace(tzinfo=None)
             _last_error = f"{type(exc).__name__}: {exc}"

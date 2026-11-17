@@ -1,8 +1,13 @@
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 
+# Kuma work runs in its own small pool so a slow or unreachable Kuma cannot
+# occupy every worker and starve the monitor checks, which are the job this
+# service actually exists to do. The three cache refreshers and the queue
+# processor all serialize on the one pooled Kuma session anyway, so three
+# threads is ample; more would only queue deeper on that lock.
 scheduler = BackgroundScheduler(
-    executors={"default": ThreadPoolExecutor(10)},
+    executors={"default": ThreadPoolExecutor(10), "kuma": ThreadPoolExecutor(3)},
     job_defaults={"max_instances": 1, "coalesce": True},
     timezone="UTC",
 )
@@ -58,6 +63,7 @@ def start_kuma_task_processor() -> None:
         seconds=10,
         id="kuma_task_processor",
         replace_existing=True,
+        executor="kuma",
     )
 
 
@@ -70,9 +76,10 @@ def start_notification_cache_refresher() -> None:
         minutes=5,
         id="notification_cache_refresher",
         replace_existing=True,
+        executor="kuma",
     )
     # Populate cache immediately on startup
-    scheduler.add_job(refresh, "date", id="notification_cache_initial")
+    scheduler.add_job(refresh, "date", id="notification_cache_initial", executor="kuma")
 
 
 def start_tag_cache_refresher() -> None:
@@ -85,6 +92,7 @@ def start_tag_cache_refresher() -> None:
         minutes=5,
         id="tag_cache_refresher",
         replace_existing=True,
+        executor="kuma",
     )
     # Stagger 5 s after notification cache so concurrent Socket.IO logins don't race.
     # Subsequent restarts serve tags instantly from DB via load_from_db() in lifespan.
@@ -92,6 +100,7 @@ def start_tag_cache_refresher() -> None:
         refresh,
         "date",
         id="tag_cache_initial",
+        executor="kuma",
         run_date=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=5),
     )
 
@@ -106,12 +115,14 @@ def start_group_cache_refresher() -> None:
         minutes=5,
         id="group_cache_refresher",
         replace_existing=True,
+        executor="kuma",
     )
     # Stagger 10 s after notification cache (tag is at +5 s) so concurrent Socket.IO logins don't race.
     scheduler.add_job(
         refresh,
         "date",
         id="group_cache_initial",
+        executor="kuma",
         run_date=datetime.utcnow() + timedelta(seconds=10),
     )
 
