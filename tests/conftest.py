@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -60,8 +62,15 @@ def client():
     app.dependency_overrides[require_api_key] = override_require_api_key
     app.dependency_overrides[require_auth] = override_require_auth
 
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
+    # Start the app's scheduler paused: jobs are still registered (tests assert on
+    # them), but none run. Unpaused, creating a monitor fires run_check at once in
+    # a worker thread against this same DB, racing the test that is mutating the
+    # row — flaky "Could not refresh instance" / StaleDataError failures.
+    from app.scheduler import scheduler
+    _start = scheduler.start
+    with patch.object(scheduler, "start", lambda *a, **kw: _start(paused=True)):
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
 
     app.dependency_overrides.clear()
     _database_mod.SessionLocal = _saved_sessionlocal
